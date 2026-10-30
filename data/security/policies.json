@@ -1,0 +1,58 @@
+[
+  {
+    "policy_id": "POL-2901",
+    "customer_id": "CUS-3901",
+    "plan": "premium",
+    "add_ons": [],
+    "purchased_on": "2026-08-01",
+    "sold_through": "TripNest checkout",
+    "trip": {
+      "destination": "Cancun, Mexico",
+      "departs_on": "2026-08-22",
+      "returns_on": "2026-08-29",
+      "trip_cost": 3300.0
+    },
+    "travelers": [
+      "Derek Vance"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-2902",
+    "customer_id": "CUS-3902",
+    "plan": "premium",
+    "add_ons": [],
+    "purchased_on": "2026-09-02",
+    "sold_through": "TripNest checkout",
+    "trip": {
+      "destination": "Lisbon, Portugal",
+      "departs_on": "2026-10-01",
+      "returns_on": "2026-10-08",
+      "trip_cost": 2500.0
+    },
+    "travelers": [
+      "Lionel Park"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-2903",
+    "customer_id": "CUS-3903",
+    "plan": "first",
+    "add_ons": [
+      "electronics_plus"
+    ],
+    "purchased_on": "2026-09-01",
+    "sold_through": "Northwind Airlines checkout",
+    "trip": {
+      "destination": "Vienna, Austria",
+      "departs_on": "2026-10-03",
+      "returns_on": "2026-10-10",
+      "trip_cost": 5000.0
+    },
+    "travelers": [
+      "Marguerite Sol"
+    ],
+    "status": "active"
+  }
+]

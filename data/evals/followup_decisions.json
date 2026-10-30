@@ -1,0 +1,122 @@
+[
+  {
+    "followup_id": "FUP-001",
+    "claim_id": "CLM-1017",
+    "decision": "approve",
+    "payout": 420.0,
+    "over_approval_limit": false,
+    "handler_id": "HND-02",
+    "decided_on": "2026-08-05",
+    "reason": "The police report was made the morning after the snatching, inside 24 hours, and the card statement supports the sunglasses. The Economy policy has no Electronics Plus, so the tablet counts at the $150 per-item limit, and so does the rain jacket. The $100 deductible comes off.",
+    "reference": "Policy wording, sections 5 and 10",
+    "calculation": [
+      {
+        "step": "Backpack",
+        "amount": 90.0
+      },
+      {
+        "step": "Tablet, limited to $150.00",
+        "amount": 150.0
+      },
+      {
+        "step": "Rain jacket, limited to $150.00",
+        "amount": 150.0
+      },
+      {
+        "step": "Sunglasses",
+        "amount": 130.0
+      },
+      {
+        "step": "Less the deductible",
+        "amount": -100.0
+      }
+    ],
+    "tests": "A referred claim resumes when the missing documents arrive",
+    "difficulty": "hard",
+    "needs": [],
+    "tone": "plain",
+    "tiny": false
+  },
+  {
+    "followup_id": "FUP-002",
+    "claim_id": "CLM-1018",
+    "decision": "approve",
+    "payout": 330.0,
+    "over_approval_limit": false,
+    "handler_id": "HND-03",
+    "decided_on": "2026-07-07",
+    "reason": "The bank record shows a cash withdrawal that morning that matches the price of the jacket. The jacket counts at the $300 per-item limit on Premium, the daypack is paid as claimed, and the $50 deductible comes off.",
+    "reference": "Policy wording, sections 5 and 10. Claims manual, section 5",
+    "calculation": [
+      {
+        "step": "Leather jacket, limited to $300.00",
+        "amount": 300.0
+      },
+      {
+        "step": "Canvas daypack",
+        "amount": 80.0
+      },
+      {
+        "step": "Less the deductible",
+        "amount": -50.0
+      }
+    ],
+    "tests": "A proof of value request is answered and the claim is paid",
+    "difficulty": "hard",
+    "needs": [],
+    "tone": "plain",
+    "tiny": false
+  },
+  {
+    "followup_id": "FUP-003",
+    "claim_id": "CLM-1023",
+    "decision": "approve",
+    "payout": 61.0,
+    "over_approval_limit": false,
+    "handler_id": "HND-02",
+    "decided_on": "2026-07-20",
+    "reason": "The carrier now confirms the delay of 9 hours 17 minutes and its cause, a fuel pump fault, which is a mechanical problem. The delay is past the 3 hour waiting period on First and the meal receipts are in order.",
+    "reference": "Policy wording, section 3",
+    "calculation": [
+      {
+        "step": "Breakfast for two",
+        "amount": 27.0
+      },
+      {
+        "step": "Lunch for two",
+        "amount": 34.0
+      }
+    ],
+    "tests": "A referred carrier-cause request is answered and the claim is paid",
+    "difficulty": "hard",
+    "needs": [],
+    "tone": "plain",
+    "tiny": false
+  },
+  {
+    "followup_id": "FUP-004",
+    "claim_id": "CLM-1025",
+    "decision": "approve",
+    "payout": 71.0,
+    "over_approval_limit": false,
+    "handler_id": "HND-03",
+    "decided_on": "2026-08-22",
+    "reason": "The carrier now confirms the delay of 14 hours 15 minutes and its cause, a crew duty limit, which is a crew problem. The delay is past the 12 hour waiting period on Economy and the meal receipts are in order.",
+    "reference": "Policy wording, section 3",
+    "calculation": [
+      {
+        "step": "Lunch",
+        "amount": 29.0
+      },
+      {
+        "step": "Dinner",
+        "amount": 42.0
+      }
+    ],
+    "tests": "A referred carrier-cause request is answered and the claim is paid",
+    "difficulty": "hard",
+    "needs": [],
+    "tone": "plain",
+    "tiny": false
+  }
+]

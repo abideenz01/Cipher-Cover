@@ -1,0 +1,59 @@
+[
+  {
+    "followup_id": "FUP-001",
+    "claim_id": "CLM-1017",
+    "received_on": "2026-08-04",
+    "note": "I found the police report and my card statement for the sunglasses.",
+    "documents": [
+      {
+        "name": "Carabinieri report",
+        "type": "police_report",
+        "content": "Arma dei Carabinieri, Stazione Napoli Centro. Report of theft, July 15, 2026, 09:40. Reported by Emily Nguyen, United States citizen. At about 21:30 on July 14, 2026 on Via Marina a passenger on a scooter pulled a backpack from the shoulder of the reporting person. Items reported stolen: one backpack, one tablet, one rain jacket and one pair of sunglasses. Report number NA-2026-077315."
+      },
+      {
+        "name": "Card statement extract",
+        "type": "other",
+        "content": "Card ending 6602, Emily Nguyen. March 8, 2026, Optica Portland: $130.00."
+      }
+    ]
+  },
+  {
+    "followup_id": "FUP-002",
+    "claim_id": "CLM-1018",
+    "received_on": "2026-07-06",
+    "note": "I found my bank record of the cash withdrawal that morning.",
+    "documents": [
+      {
+        "name": "ATM record",
+        "type": "other",
+        "content": "Banca Toscana ATM record, Florence, June 22, 2026, 09:12. Cash withdrawal, card ending 3921, Hector Villanueva: EUR 400.00, equal to $428.00."
+      }
+    ]
+  },
+  {
+    "followup_id": "FUP-003",
+    "claim_id": "CLM-1023",
+    "received_on": "2026-07-19",
+    "note": "Northwind sent me this letter about the cause of the delay.",
+    "documents": [
+      {
+        "name": "Northwind cause letter",
+        "type": "carrier_report",
+        "content": "Northwind Airlines, July 18, 2026. Flight NW 418 Dallas DFW to Vancouver YVR, July 3, 2026. The departure was delayed from 08:15 to 17:32 because of a fuel pump fault found on the aircraft before departure. Passengers: Stephanie Marsh, Colin Marsh."
+      }
+    ]
+  },
+  {
+    "followup_id": "FUP-004",
+    "claim_id": "CLM-1025",
+    "received_on": "2026-08-21",
+    "note": "Skylark sent me this letter about the cause of the delay.",
+    "documents": [
+      {
+        "name": "Skylark cause letter",
+        "type": "carrier_report",
+        "content": "Skylark Airways, August 20, 2026. Flight SK 233 Anchorage ANC to Las Vegas LAS, August 9, 2026. The departure was delayed from 11:55 to 02:10 on August 10 because the first officer reached the crew duty limit and a replacement crew had to be flown in. Passenger: Curtis Ballard."
+      }
+    ]
+  }
+]

@@ -1,0 +1,37 @@
+[
+  {
+    "handler_id": "HND-01",
+    "name": "Dana Whitfield",
+    "role": "Senior Claims Handler",
+    "email": "dana.whitfield@undercover.example",
+    "can_approve_over_limit": true
+  },
+  {
+    "handler_id": "HND-02",
+    "name": "Marcus Oyelaran",
+    "role": "Claims Handler",
+    "email": "marcus.oyelaran@undercover.example",
+    "can_approve_over_limit": true
+  },
+  {
+    "handler_id": "HND-03",
+    "name": "Priya Raman",
+    "role": "Claims Handler",
+    "email": "priya.raman@undercover.example",
+    "can_approve_over_limit": true
+  },
+  {
+    "handler_id": "HND-04",
+    "name": "Leon Abara",
+    "role": "Claims Handler, in training",
+    "email": "leon.abara@undercover.example",
+    "can_approve_over_limit": false
+  },
+  {
+    "handler_id": "HND-05",
+    "name": "Tobias Wren",
+    "role": "Special Investigations Officer",
+    "email": "tobias.wren@undercover.example",
+    "can_approve_over_limit": false
+  }
+]

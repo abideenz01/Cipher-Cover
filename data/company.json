@@ -1,0 +1,20 @@
+{
+  "name": "UnderCover Travel Insurance",
+  "currency": "USD",
+  "payout_approval_limit": 1000.0,
+  "claim_filing_window_days": 90,
+  "pre_existing_look_back_days": 60,
+  "repeat_claim_review": {
+    "claims": 3,
+    "within_months": 12
+  },
+  "meal_allowance_without_receipts": {
+    "amount": 35.0,
+    "per": "traveler per day of covered delay"
+  },
+  "document_request_window_days": 30,
+  "sign_off_sla_hours": 24,
+  "agent_run_timeout_seconds": 120,
+  "policy_wording_version": "2026.1",
+  "claims_manual_version": "2026.2"
+}

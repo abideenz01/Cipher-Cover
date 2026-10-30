@@ -1,0 +1,47 @@
+[
+  {
+    "customer_id": "CUS-3901",
+    "name": "Derek Vance",
+    "email": "derek.vance@example.com",
+    "phone": "+1 702 555 0118",
+    "date_of_birth": "1984-04-23",
+    "address": {
+      "street": "9021 West Sahara Avenue",
+      "city": "Las Vegas",
+      "state": "NV",
+      "zip": "89117"
+    },
+    "customer_since": "2026-08-01",
+    "previous_claims": []
+  },
+  {
+    "customer_id": "CUS-3902",
+    "name": "Lionel Park",
+    "email": "lionel.park@example.com",
+    "phone": "+1 415 555 0141",
+    "date_of_birth": "1991-11-09",
+    "address": {
+      "street": "910 Valencia Street",
+      "city": "San Francisco",
+      "state": "CA",
+      "zip": "94110"
+    },
+    "customer_since": "2026-09-02",
+    "previous_claims": []
+  },
+  {
+    "customer_id": "CUS-3903",
+    "name": "Marguerite Sol",
+    "email": "marguerite.sol@example.com",
+    "phone": "+1 504 555 0152",
+    "date_of_birth": "1983-08-27",
+    "address": {
+      "street": "2306 Magazine Street",
+      "city": "New Orleans",
+      "state": "LA",
+      "zip": "70130"
+    },
+    "customer_since": "2025-02-13",
+    "previous_claims": []
+  }
+]
