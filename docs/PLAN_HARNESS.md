@@ -187,12 +187,12 @@ Build:
 
 Success criteria:
 
-- [ ] Vitest: the run panel shows each to-do status with its word; Stop is shown only while a run is live; the cap field sends `{cap: 5}` and "All" sends `{cap: 0}`; the history opens a past run; the drawer groups the trace by attempt and lists sections read; the Instructions view shows both panels and the fingerprint. TypeScript coverage stays at or above 80%.
-- [ ] Playwright: a run with cap 3 fills the to-do list, ticks off 3 items, shows the summary, and leaves the other claims in Waiting.
-- [ ] Playwright: opening a decided claim shows `wording-10` under Sections read and on the Decision tab.
-- [ ] Playwright: Stop during a run ends it `stopped`, with the remaining items Not started.
-- [ ] The Playwright brand check passes in dark and light mode: chips carry labels, focus rings show, and text meets AA. Screenshots are refreshed in `docs/screens/`.
-- [ ] `npm run check` passes. Commit.
+- [x] Vitest: the run panel shows each to-do status with its word; Stop is shown only while a run is live; the cap field sends `{cap: 5}` and "All" sends `{cap: 0}`; the history opens a past run; the drawer groups the trace by attempt and lists sections read; the Instructions view shows both panels and the fingerprint. TypeScript coverage stays at or above 80%.
+- [x] Playwright: a run with cap 3 fills the to-do list, ticks off 3 items, shows the summary, and leaves the other claims in Waiting.
+- [x] Playwright: opening a decided claim shows `wording-10` under Sections read and on the Decision tab.
+- [x] Playwright: Stop during a run ends it `stopped`, with the remaining items Not started.
+- [x] The Playwright brand check passes in dark and light mode: chips carry labels, focus rings show, and text meets AA. Screenshots are refreshed in `docs/screens/`.
+- [x] `npm run check` passes. Commit.
 
 ## Phase 6: A live run and the docs
 

@@ -35,6 +35,9 @@ export function ClaimCard({
         <span>{claim.customer}</span>
         <span className="muted">{label(claim.claim_type)}</span>
       </span>
+      {claim.left_for_handler && (
+        <span className="chip chip-left_for_handler">Left for a handler</span>
+      )}
       {claim.state === "waiting_for_signoff" && (
         <span className="muted mono">
           Waited {waited(claim.state_since, now)}

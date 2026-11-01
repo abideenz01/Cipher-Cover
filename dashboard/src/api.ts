@@ -16,6 +16,8 @@ export interface ClaimSummary {
   decision: DecisionKind | "";
   payout: number;
   paid: number;
+  failed_attempts: number;
+  left_for_handler: boolean;
 }
 
 export interface Item {
@@ -40,17 +42,70 @@ export interface Decision {
   payout: number;
   reason: string;
   section: string;
+  sections: Section[];
+  run_id: string;
   steps: Step[];
   model: string;
   wording_version: string;
   created_at: string;
 }
 
+export interface Section {
+  id: string;
+  title: string;
+}
+
+export type Failure = "" | "provider" | "step_limit" | "time_limit" | "error";
+
 export interface Run {
   run_id: string;
   claim_id: string;
   status: "running" | "succeeded" | "failed";
   error: string;
+  started_at: string;
+  ended_at: string;
+  queue_run_id: string;
+  attempt: number;
+  failure: Failure;
+  tokens: number;
+  model_calls: number;
+  model: string;
+  seconds: number;
+  sections_read: Section[];
+}
+
+export type TodoStatus =
+  "to_do" | "in_progress" | "done" | "left_for_handler" | "not_started";
+
+export interface Todo {
+  claim_id: string;
+  status: TodoStatus;
+  note: string;
+}
+
+export type QueueRunStatus =
+  "running" | "stopping" | "succeeded" | "stopped" | "paused" | "failed";
+
+export interface QueueRun {
+  run_id: string;
+  status: QueueRunStatus;
+  cap: number;
+  limits: {
+    claim_step_limit: number;
+    claim_seconds: number;
+    token_limit: number;
+    provider_failures_to_pause: number;
+  };
+  model: string;
+  reasoning_effort: string;
+  fingerprint: string;
+  todos: Todo[];
+  summary: string;
+  stop_reason: string;
+  error: string;
+  tokens: number;
+  seconds: number;
+  claims_worked: number;
   started_at: string;
   ended_at: string;
 }
@@ -160,7 +215,10 @@ export const api = {
       reason,
     }),
   startRun: (claimId: string) => post<Run>(`/api/claims/${claimId}/runs`),
-  startQueueRun: () => post<{ claim_ids: string[] }>("/api/runs"),
+  startQueueRun: (cap: number) => post<QueueRun>("/api/runs", { cap }),
+  stopQueueRun: (runId: string) =>
+    post<QueueRun>(`/api/queue-runs/${runId}/stop`),
+  listQueueRuns: () => request<QueueRun[]>("/api/queue-runs"),
   getRun: (runId: string) => request<Run>(`/api/runs/${runId}`),
   listRunEvents: (runId: string) =>
     request<TraceEvent[]>(`/api/runs/${runId}/events`),

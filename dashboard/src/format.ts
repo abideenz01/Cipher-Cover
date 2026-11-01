@@ -1,4 +1,11 @@
-import type { ClaimState, ClaimSummary, DecisionKind } from "./api";
+import type {
+  ClaimState,
+  ClaimSummary,
+  DecisionKind,
+  Failure,
+  QueueRunStatus,
+  TodoStatus,
+} from "./api";
 
 export const STATES: ClaimState[] = [
   "waiting",
@@ -19,6 +26,55 @@ export const DECISION_LABELS: Record<DecisionKind, string> = {
   decline: "Decline",
   refer: "Refer",
 };
+
+export const TODO_LABELS: Record<TodoStatus, string> = {
+  to_do: "To do",
+  in_progress: "In progress",
+  done: "Done",
+  left_for_handler: "Left for a handler",
+  not_started: "Not started",
+};
+
+export const RUN_LABELS: Record<QueueRunStatus, string> = {
+  running: "Running",
+  stopping: "Stopping",
+  succeeded: "Finished",
+  stopped: "Stopped",
+  paused: "Paused",
+  failed: "Failed",
+};
+
+export const STOP_REASONS: Record<string, string> = {
+  cap: "It reached its cap.",
+  queue_empty: "The queue is empty.",
+  token_limit: "It spent its token budget.",
+  stopped: "A handler stopped it.",
+  provider_errors: "It paused after repeated errors from the model provider.",
+  error: "It failed.",
+};
+
+export const FAILURE_LABELS: Record<Failure, string> = {
+  "": "",
+  provider: "model provider errors",
+  step_limit: "step limit",
+  time_limit: "time limit",
+  error: "error",
+};
+
+export function isLive(status: QueueRunStatus): boolean {
+  return status === "running" || status === "stopping";
+}
+
+export function count(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+export function duration(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  return minutes
+    ? `${String(minutes)} min ${String(seconds % 60)} s`
+    : `${String(seconds)} s`;
+}
 
 const dollars = new Intl.NumberFormat("en-US", {
   style: "currency",

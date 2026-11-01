@@ -39,6 +39,26 @@
   --chip-mic-speaking-fg: #14122b;
   --chip-caption-you-bg: #6c4dff;
   --chip-caption-you-fg: #ffffff;
+  --chip-to_do-bg: #1fb5d9;
+  --chip-to_do-fg: #14122b;
+  --chip-done-bg: #d7f75b;
+  --chip-done-fg: #14122b;
+  --chip-left_for_handler-bg: #ff7b3d;
+  --chip-left_for_handler-fg: #14122b;
+  --chip-not_started-bg: #3a3566;
+  --chip-not_started-fg: #e4e1fa;
+  --chip-run-running-bg: #6c4dff;
+  --chip-run-running-fg: #ffffff;
+  --chip-run-stopping-bg: #ff7b3d;
+  --chip-run-stopping-fg: #14122b;
+  --chip-run-succeeded-bg: #d7f75b;
+  --chip-run-succeeded-fg: #14122b;
+  --chip-run-stopped-bg: #3a3566;
+  --chip-run-stopped-fg: #e4e1fa;
+  --chip-run-paused-bg: #ff7b3d;
+  --chip-run-paused-fg: #14122b;
+  --chip-run-failed-bg: #d41f49;
+  --chip-run-failed-fg: #ffffff;
 
   --page: #0d0b1e;
   --panel: #181530;
@@ -352,6 +372,175 @@ select {
 .chip-overdue {
   background: var(--chip-overdue-bg);
   color: var(--chip-overdue-fg);
+}
+
+.chip-to_do {
+  background: var(--chip-to_do-bg);
+  color: var(--chip-to_do-fg);
+}
+
+.chip-done {
+  background: var(--chip-done-bg);
+  color: var(--chip-done-fg);
+}
+
+.chip-left_for_handler {
+  background: var(--chip-left_for_handler-bg);
+  color: var(--chip-left_for_handler-fg);
+}
+
+.chip-not_started {
+  background: var(--chip-not_started-bg);
+  color: var(--chip-not_started-fg);
+}
+
+.chip-run-running {
+  background: var(--chip-run-running-bg);
+  color: var(--chip-run-running-fg);
+}
+
+.chip-run-stopping {
+  background: var(--chip-run-stopping-bg);
+  color: var(--chip-run-stopping-fg);
+}
+
+.chip-run-succeeded {
+  background: var(--chip-run-succeeded-bg);
+  color: var(--chip-run-succeeded-fg);
+}
+
+.chip-run-stopped {
+  background: var(--chip-run-stopped-bg);
+  color: var(--chip-run-stopped-fg);
+}
+
+.chip-run-paused {
+  background: var(--chip-run-paused-bg);
+  color: var(--chip-run-paused-fg);
+}
+
+.chip-run-failed {
+  background: var(--chip-run-failed-bg);
+  color: var(--chip-run-failed-fg);
+}
+
+.todo .chip-in_progress::before,
+.chip-run-running::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.run-control {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.cap {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cap input[type="number"] {
+  width: 64px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-chip);
+  background: var(--panel);
+  text-align: right;
+}
+
+.run-panel {
+  margin: 16px 0;
+}
+
+.run-panel .view-head h2 {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  margin: 0;
+}
+
+.todos,
+.run-history ul,
+.sections {
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo {
+  display: grid;
+  grid-template-columns: 96px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: var(--radius-card);
+}
+
+.todo:nth-child(odd) {
+  background: var(--raised);
+}
+
+.todo-note {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-usage {
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.run-summary {
+  margin: 12px 0 4px;
+  font-size: 16px;
+  white-space: pre-wrap;
+}
+
+.run-history summary {
+  margin-top: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.history-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-card);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background 160ms;
+}
+
+.history-row:hover,
+.history-row[aria-current="true"] {
+  background: var(--raised);
+}
+
+.sections li {
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.attempt h4 {
+  margin: 12px 0 0;
+  font-size: 13px;
 }
 
 .empty {
@@ -776,6 +965,8 @@ select {
   }
 
   .node.live::before,
+  .todo .chip-in_progress::before,
+  .chip-run-running::before,
   .mic-listening,
   .level {
     animation: none;
@@ -812,6 +1003,19 @@ select {
 
   .metric-strip {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .command-bar {
+    flex-wrap: wrap;
+  }
+
+  .todo {
+    grid-template-columns: 88px 1fr;
+  }
+
+  .todo .chip {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .board {

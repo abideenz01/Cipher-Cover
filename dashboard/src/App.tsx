@@ -3,6 +3,7 @@ import {
   api,
   type ClaimSummary,
   type Handler,
+  type QueueRun,
   type UiAction,
   type VoiceConfig,
 } from "./api";
@@ -11,7 +12,8 @@ import { CommandBar } from "./components/CommandBar";
 import { Drawer } from "./components/Drawer";
 import { MetricStrip } from "./components/MetricStrip";
 import { Rail, type View } from "./components/Rail";
-import { matches } from "./format";
+import { RunPanel } from "./components/RunPanel";
+import { isLive, matches } from "./format";
 import { Instructions } from "./views/Instructions";
 import { SignOff, type Highlight } from "./views/SignOff";
 import { CaptionsPanel, ConsentNotice } from "./voice/CaptionsPanel";
@@ -55,6 +57,8 @@ export function App() {
   const [handlers, setHandlers] = useState<Handler[]>([]);
   const [voiceHandler, setVoiceHandler] = useState("HND-01");
   const [highlight, setHighlight] = useState<Highlight | null>(null);
+  const [queueRuns, setQueueRuns] = useState<QueueRun[]>([]);
+  const [shownRun, setShownRun] = useState("");
 
   useEffect(() => {
     api.getVoiceConfig().then(setVoiceConfig, () => {
@@ -85,9 +89,10 @@ export function App() {
   const voice = useVoice({ provider, handlerId: voiceHandler, onAction });
 
   const refresh = useCallback(() => {
-    api.listClaims().then(
-      (next) => {
+    Promise.all([api.listClaims(), api.listQueueRuns()]).then(
+      ([next, nextRuns]) => {
         setClaims(next);
+        setQueueRuns(nextRuns);
         setNow(new Date());
         setError("");
       },
@@ -96,6 +101,10 @@ export function App() {
       },
     );
   }, []);
+
+  function failed(e: unknown) {
+    setError(e instanceof Error ? e.message : "The run did not start.");
+  }
 
   useEffect(() => {
     refresh();
@@ -125,6 +134,9 @@ export function App() {
     .map((c) => c.claim_id + c.state_since)
     .join();
   const shown = search ? claims.filter((c) => matches(c, search)) : claims;
+  const live = queueRuns.find((r) => isLive(r.status));
+  const panelRun =
+    queueRuns.find((r) => r.run_id === shownRun) ?? live ?? queueRuns[0];
 
   return (
     <div className="app">
@@ -135,8 +147,13 @@ export function App() {
           onSearch={setSearch}
           theme={theme}
           onToggleTheme={toggleTheme}
-          onRunAll={() => {
-            void api.startQueueRun().then(refresh);
+          live={live}
+          onStart={(cap) => {
+            setShownRun("");
+            api.startQueueRun(cap).then(refresh, failed);
+          }}
+          onStop={(runId) => {
+            api.stopQueueRun(runId).then(refresh, failed);
           }}
         >
           {provider?.available && (
@@ -150,7 +167,14 @@ export function App() {
         {error && <p className="error">{error}</p>}
         <MetricStrip claims={claims} now={now} />
         {view === "queue" && (
-          <Board claims={shown} now={now} onOpen={setOpenId} />
+          <>
+            <RunPanel
+              run={panelRun}
+              history={queueRuns}
+              onSelect={setShownRun}
+            />
+            <Board claims={shown} now={now} onOpen={setOpenId} />
+          </>
         )}
         {view === "signoff" && (
           <SignOff

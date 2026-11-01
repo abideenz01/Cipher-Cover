@@ -1,5 +1,12 @@
 import { vi } from "vitest";
-import type { Claim, ClaimState, ClaimSummary, Policy } from "./api";
+import type {
+  Claim,
+  ClaimState,
+  ClaimSummary,
+  Policy,
+  QueueRun,
+  Run,
+} from "./api";
 
 type Handler = (body: unknown) => unknown;
 
@@ -28,6 +35,55 @@ export function summary(
     decision: "",
     payout: 0,
     paid: 0,
+    failed_attempts: 0,
+    left_for_handler: false,
+    ...overrides,
+  };
+}
+
+export function run(overrides: Partial<Run> = {}): Run {
+  return {
+    run_id: "r1",
+    claim_id: "CLM-1002",
+    status: "succeeded",
+    error: "",
+    started_at: "2026-10-30T07:00:00+00:00",
+    ended_at: "2026-10-30T07:00:30+00:00",
+    queue_run_id: "q1",
+    attempt: 1,
+    failure: "",
+    tokens: 1200,
+    model_calls: 8,
+    model: "scripted",
+    seconds: 30,
+    sections_read: [],
+    ...overrides,
+  };
+}
+
+export function queueRun(overrides: Partial<QueueRun> = {}): QueueRun {
+  return {
+    run_id: "q1",
+    status: "running",
+    cap: 5,
+    limits: {
+      claim_step_limit: 30,
+      claim_seconds: 120,
+      token_limit: 1_000_000,
+      provider_failures_to_pause: 3,
+    },
+    model: "deepseek/deepseek-v4.1-flash",
+    reasoning_effort: "low",
+    fingerprint: "a1b2c3d4e5f6",
+    todos: [],
+    summary: "",
+    stop_reason: "",
+    error: "",
+    tokens: 12345,
+    seconds: 75,
+    claims_worked: 2,
+    started_at: "2026-10-30T07:00:00+00:00",
+    ended_at: "",
     ...overrides,
   };
 }
@@ -65,7 +121,11 @@ export const POLICY: Policy = {
   limits: { name: "UnderCover Premium" },
 };
 
-export function stubApi(routes: Record<string, unknown>) {
+export function stubApi(given: Record<string, unknown>) {
+  const routes: Record<string, unknown> = {
+    "GET /api/queue-runs": [],
+    ...given,
+  };
   const calls: { key: string; body: unknown }[] = [];
   const fetch = vi.fn((path: string, init?: RequestInit) => {
     const key = `${init?.method ?? "GET"} ${path}`;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type Claim, type Policy } from "../api";
-import { label, money } from "../format";
+import { api, type Claim, type Policy, type Run, type Section } from "../api";
+import { count, duration, FAILURE_LABELS, label, money } from "../format";
 import { Ledger } from "./Ledger";
 import { DecisionChip, StateChip } from "./StateChip";
 import { Trace } from "./Timeline";
@@ -81,6 +81,62 @@ function Documents({ claim }: Readonly<{ claim: Claim }>) {
   );
 }
 
+function SectionList({
+  sections,
+  label: name,
+}: Readonly<{ sections: Section[]; label: string }>) {
+  return (
+    <ul className="sections" aria-label={name}>
+      {sections.map((section) => (
+        <li key={section.id}>
+          <span className="mono">{section.id}</span> {section.title}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function attemptLabel(run: Run): string {
+  const failure = run.failure ? ` (${FAILURE_LABELS[run.failure]})` : "";
+  const status = run.status === "running" ? "running" : run.status;
+  return `Attempt ${String(run.attempt)} · ${status}${failure}`;
+}
+
+function Attempts({ runs }: Readonly<{ runs: Run[] }>) {
+  if (!runs.length) {
+    return (
+      <p className="empty">
+        No attempts yet. Run the agent from the Decision tab.
+      </p>
+    );
+  }
+  return (
+    <>
+      {runs.map((run) => (
+        <section
+          key={run.run_id}
+          className="section attempt"
+          aria-label={`Attempt ${String(run.attempt)}`}
+        >
+          <h3>{attemptLabel(run)}</h3>
+          <p className="muted mono">
+            {count(run.tokens)} tokens · {run.model_calls} model calls ·{" "}
+            {duration(run.seconds)}
+            {run.model && ` · ${run.model}`}
+          </p>
+          <h4>Sections read</h4>
+          {run.sections_read.length ? (
+            <SectionList sections={run.sections_read} label="Sections read" />
+          ) : (
+            <p className="empty">No sections read yet.</p>
+          )}
+          <Trace runId={run.run_id} />
+        </section>
+      ))}
+    </>
+  );
+}
+
 function DecisionTab({
   claim,
   onRun,
@@ -131,7 +187,8 @@ function DecisionTab({
         </section>
       )}
       <section className="section">
-        <h3>{decision.section}</h3>
+        <h3>Sections relied on</h3>
+        <SectionList sections={decision.sections} label="Sections relied on" />
         <p className="accent">{decision.reason}</p>
         <p className="muted mono">
           {decision.model} · wording {decision.wording_version}
@@ -189,7 +246,6 @@ export function Drawer({
     });
   }
 
-  const latestRun = claim?.runs.at(-1);
   return (
     <>
       <div className="backdrop" onClick={onClose} aria-hidden="true" />
@@ -223,14 +279,7 @@ export function Drawer({
             {tab === "Overview" && <Overview claim={claim} policy={policy} />}
             {tab === "Documents" && <Documents claim={claim} />}
             {tab === "Decision" && <DecisionTab claim={claim} onRun={run} />}
-            {tab === "Trace" &&
-              (latestRun ? (
-                <Trace key={latestRun.run_id} runId={latestRun.run_id} />
-              ) : (
-                <p className="empty">
-                  No runs yet. Run the agent from the Decision tab.
-                </p>
-              ))}
+            {tab === "Trace" && <Attempts runs={claim.runs} />}
           </div>
         )}
       </aside>
