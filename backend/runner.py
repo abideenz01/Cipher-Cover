@@ -4,8 +4,8 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-from agent import main
-from agent.stub import ScriptedModel
+from agent import main, queue
+from agent.stub import QueueScript, ScriptedModel
 from backend import db
 
 
@@ -20,7 +20,8 @@ def execute(
 
 
 def execute_queue(run_id: str, on_step: Callable[[str, dict[str, Any]], None]) -> None:
-    """Run the queue agent on a queue run."""
-    raise NotImplementedError(
-        f"The queue agent is not built yet ({run_id}, {on_step})."
-    )
+    """Run the queue agent, with the scripted models when AGENT_STUB=1."""
+    if os.getenv("AGENT_STUB") == "1":
+        queue.run_queue(run_id, QueueScript(), ScriptedModel(), on_step)
+    else:
+        queue.run_queue(run_id, None, None, on_step)

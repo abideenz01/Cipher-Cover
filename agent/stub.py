@@ -16,6 +16,8 @@ from pydantic import Field
 
 TOKENS_PER_CALL = 100
 
+Script = tuple[str, list[tuple[str, dict[str, Any]]]]
+
 
 def result(messages: list[BaseMessage], name: str) -> Any:
     """Return the last result of a tool, parsed from JSON."""
@@ -123,18 +125,22 @@ class FaultyModel(ScriptedModel):
     """The scripted model, with the failures a long run meets.
 
     errors are raised one per call before the script goes on. always is raised on
-    every call. loop keeps reading the claim forever. cite_unread first cites a
-    section it never read, then reads it and decides again.
+    every call, and fail_on on every call for that claim. loop keeps reading the
+    claim forever. cite_unread first cites a section it never read, then reads it
+    and decides again.
     """
 
     errors: list[Exception] = Field(default_factory=list)
     always: Exception | None = None
+    fail_on: str = ""
     loop: bool = False
     cite_unread: bool = False
 
     def _generate(self, messages: list[BaseMessage], *_: Any, **__: Any) -> ChatResult:
         if self.always:
             raise self.always
+        if self.fail_on and self.fail_on in messages[1].text:
+            raise RuntimeError(f"The claim agent broke on {self.fail_on}.")
         if self.errors:
             raise self.errors.pop(0)
         return super()._generate(messages)
@@ -164,3 +170,113 @@ class FaultyModel(ScriptedModel):
             }
             return reply("", [("record_decision", decision)], n)
         return super().next_message(messages)
+
+
+class QueueScript(BaseChatModel):
+    """Run the queue in order: plan, work each claim, tick it off, finish.
+
+    finish_early tries to finish before working anything, to meet the check for
+    missed claims.
+    """
+
+    finish_early: bool = False
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted"
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "QueueScript":  # noqa: ARG002
+        return self
+
+    def _generate(self, messages: list[BaseMessage], *_: Any, **__: Any) -> ChatResult:
+        message = self.next_message(messages)
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    def next_message(self, messages: list[BaseMessage]) -> AIMessage:
+        """Return the next step of the run, from the last tool it called."""
+        last = messages[-1]
+        done = (last.name or "") if isinstance(last, ToolMessage) else ""
+        steps = {
+            "": lambda _: ("", [("get_run_status", {})]),
+            "get_run_status": lambda _: ("", [("list_waiting_claims", {})]),
+            "list_waiting_claims": self.plan,
+            "work_claim": self.tick,
+            "finish_run": self.after_finish,
+        }
+        content, calls = steps.get(done, self.after_todos)(messages)
+        return reply(content, calls, len(messages))
+
+    def plan(self, messages: list[BaseMessage]) -> Script:
+        """Write a to-do list of the waiting claims, up to the cap."""
+        cap = result(messages, "get_run_status")["cap"]
+        waiting = [c["claim_id"] for c in result(messages, "list_waiting_claims")]
+        return "", [
+            ("write_todos", {"todos": items(waiting[:cap] if cap else waiting)})
+        ]
+
+    def tick(self, messages: list[BaseMessage]) -> Script:
+        """Tick off the item in progress, or finish when the run refused it."""
+        outcome = messages[-1].text
+        if "not started" in outcome:
+            return "", [("finish_run", {"summary": outcome})]
+        todos = ticked(latest_todos(messages), outcome)
+        return "", [("write_todos", {"todos": todos})]
+
+    def after_finish(self, messages: list[BaseMessage]) -> Script:
+        """End, or add the claims the run said were missed."""
+        finished = result(messages, "finish_run")
+        if "error" not in finished:
+            return "Run finished.", []
+        cap = result(messages, "get_run_status")["cap"]
+        todos = latest_todos(messages)
+        have = {t["claim_id"] for t in todos}
+        extra = [c for c in re.findall(r"CLM-\d+", finished["error"]) if c not in have]
+        room = cap - len(todos)
+        extra = extra[:room] if cap else extra
+        return "", [("write_todos", {"todos": todos + items(extra)})]
+
+    def after_todos(self, messages: list[BaseMessage]) -> Script:
+        """Work the item in progress, start the next one, or finish."""
+        todos = latest_todos(messages)
+        if self.finish_early and not result(messages, "finish_run"):
+            return "", [("finish_run", {"summary": "Nothing to do."})]
+        working = [t for t in todos if t["status"] == "in_progress"]
+        if working:
+            return "", [("work_claim", {"claim_id": working[0]["claim_id"]})]
+        waiting = [t for t in todos if t["status"] == "to_do"]
+        if waiting:
+            started = [
+                t | {"status": "in_progress"} if t is waiting[0] else t for t in todos
+            ]
+            return "", [("write_todos", {"todos": started})]
+        decided = sum(t["status"] == "done" for t in todos)
+        return "", [("finish_run", {"summary": f"Decided {decided} claims."})]
+
+
+def items(claim_ids: list[str]) -> list[dict[str, Any]]:
+    """Return new to-do items for claims."""
+    return [{"claim_id": c, "status": "to_do", "note": ""} for c in claim_ids]
+
+
+def latest_todos(messages: list[BaseMessage]) -> list[dict[str, Any]]:
+    """Return the to-do list as last written."""
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            for tool_call in message.tool_calls:
+                if tool_call["name"] == "write_todos":
+                    return tool_call["args"]["todos"]
+    return []
+
+
+def ticked(todos: list[dict[str, Any]], outcome: str) -> list[dict[str, Any]]:
+    """Mark the item in progress from the claim agent's one-line outcome."""
+    if "left for a handler" in outcome:
+        status = "left_for_handler"
+    elif "back in the queue" in outcome:
+        status = "to_do"
+    else:
+        status = "done"
+    return [
+        t | {"status": status, "note": outcome} if t["status"] == "in_progress" else t
+        for t in todos
+    ]

@@ -162,14 +162,14 @@ Build:
 
 Success criteria (stub models only):
 
-- [ ] A stub queue run with `cap: 3` on a fresh database decides 3 claims, leaves the other 32 `waiting`, and ends `succeeded` with a summary. Its to-do list has 3 items, all `done`.
-- [ ] Each claim run in that queue run has its own events and its own first message ("Claim CLM-…"), with no messages from another claim.
-- [ ] The queue agent's tools don't include `record_decision`, `pay_claim` or `calculate_payout`, and the backend refuses a decision sent with the queue run's id.
-- [ ] A claim agent that raises on CLM-1002 doesn't stop the run: the other claims are decided, CLM-1002 is tried again, and if it fails again it's left for a handler and its to-do item is `left_for_handler`.
-- [ ] A queue model that tries to finish early is refused, works the missed claim, and then finishes.
-- [ ] A queue model whose provider keeps failing leaves the run `paused`, with no claim `in_progress`.
-- [ ] A named-claim `start_run` still works and voice's tests still pass.
-- [ ] `npm run check:python` passes. Commit.
+- [x] A stub queue run with `cap: 3` on a fresh database decides 3 claims, leaves the other 32 `waiting`, and ends `succeeded` with a summary. Its to-do list has 3 items, all `done`.
+- [x] Each claim run in that queue run has its own events and its own first message ("Claim CLM-…"), with no messages from another claim.
+- [x] The queue agent's tools don't include `record_decision`, `pay_claim` or `calculate_payout`, and the backend refuses a decision sent with the queue run's id.
+- [x] A claim agent that raises on CLM-1002 doesn't stop the run: the other claims are decided, CLM-1002 is tried again, and if it fails again it's left for a handler and its to-do item is `left_for_handler`.
+- [x] A queue model that tries to finish early is refused, works the missed claim, and then finishes.
+- [x] A queue model whose provider keeps failing leaves the run `paused`, with no claim `in_progress`.
+- [x] A named-claim `start_run` still works and voice's tests still pass.
+- [x] `npm run check:python` passes. Commit.
 
 ## Phase 5: The dashboard
 
