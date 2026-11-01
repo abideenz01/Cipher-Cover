@@ -1,4 +1,5 @@
 import shutil
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -70,7 +71,17 @@ def test_wording_and_instructions():
     assert wording["text"] == (seed.DATA / "policy_wording.md").read_text(
         encoding="utf-8"
     )
-    assert client.get("/api/instructions").json()["text"]
+    instructions = client.get("/api/instructions").json()
+    assert instructions["queue"].startswith("# The UnderCover Agent: running the queue")
+    assert instructions["claim"].startswith("# The UnderCover Agent: working a claim")
+    assert len(instructions["fingerprint"]) == 12
+    assert "evals" not in instructions["queue"] + instructions["claim"]
+
+
+def test_nothing_opens_the_answer_key():
+    for path in [*Path("agent").rglob("*.py"), *Path("backend").rglob("*.py")]:
+        if "tests" not in path.parts:
+            assert "evals" not in path.read_text(encoding="utf-8"), path
 
 
 def test_handlers():

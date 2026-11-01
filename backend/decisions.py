@@ -7,7 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend import clock, db, payout, store
+from backend import clock, db, payout, sections, store
 
 router = APIRouter(prefix="/api")
 
@@ -15,6 +15,7 @@ router = APIRouter(prefix="/api")
 class Calculation(BaseModel):
     """The lines to pay and what others have already paid."""
 
+    run_id: str
     lines: list[payout.Line]
     paid_by_others: float
 
@@ -22,22 +23,46 @@ class Calculation(BaseModel):
 class Decision(BaseModel):
     """The agent's decision on a claim."""
 
+    run_id: str
     decision: Literal["approve", "decline", "refer"]
     payout: float
     reason: str
-    section: str
+    sections: list[str]
     model: str
 
 
 class Payment(BaseModel):
     """An amount to pay on a claim."""
 
+    run_id: str
     amount: float
 
 
 def limit_cents(conn: sqlite3.Connection) -> int:
     """Return the payout approval limit in cents."""
     return db.cents(db.reference(conn, "company")["payout_approval_limit"])
+
+
+def holds(conn: sqlite3.Connection, run_id: str, claim_id: str) -> None:
+    """Refuse unless the run is a live claim run on this claim."""
+    store.claim_row(conn, claim_id)
+    if store.live_run(conn, run_id)["claim_id"] != claim_id:
+        raise HTTPException(409, f"Run {run_id} is not working claim {claim_id}.")
+
+
+def cited(conn: sqlite3.Connection, run_id: str, ids: list[str]) -> str:
+    """Return the cited sections as text, or refuse what the run never read."""
+    if not ids:
+        raise HTTPException(409, "Cite at least one section you relied on.")
+    read = store.read_sections(conn, run_id)
+    unread = [s for s in ids if s not in read]
+    if unread:
+        raise HTTPException(
+            409,
+            f"Section {', '.join(unread)} was not read on this run."
+            " Read it with read_section before you cite it.",
+        )
+    return "; ".join(sections.title(s) for s in ids)
 
 
 def pay(conn: sqlite3.Connection, claim_id: str, amount_cents: int) -> None:
@@ -52,6 +77,7 @@ def pay(conn: sqlite3.Connection, claim_id: str, amount_cents: int) -> None:
 def calculate_payout(claim_id: str, body: Calculation) -> dict[str, Any]:
     """Work out a payout under section 10 of the policy wording."""
     with db.connect() as conn:
+        holds(conn, body.run_id, claim_id)
         claim = store.claim_row(conn, claim_id)
         policy = store.policy_view(conn, claim["policy_id"])
         benefit = json.loads(claim["data"])["claim_type"]
@@ -70,9 +96,12 @@ def calculate_payout(claim_id: str, body: Calculation) -> dict[str, Any]:
 def record_decision(claim_id: str, body: Decision) -> dict[str, Any]:
     """Store the agent's decision on a claim."""
     with db.connect() as conn:
-        store.claim_row(conn, claim_id)
-        if store.paid_cents(conn, claim_id):
-            raise HTTPException(409, "This claim is already paid.")
+        holds(conn, body.run_id, claim_id)
+        if store.claim_row(conn, claim_id)["state"] != "in_progress":
+            raise HTTPException(409, f"Claim {claim_id} is already decided.")
+        if not body.reason.strip():
+            raise HTTPException(409, "The reason is missing.")
+        section = cited(conn, body.run_id, body.sections)
         amount = db.cents(body.payout)
         steps: list[dict[str, Any]] = []
         if body.decision == "approve":
@@ -90,18 +119,20 @@ def record_decision(claim_id: str, body: Decision) -> dict[str, Any]:
         wording = db.reference(conn, "company")["policy_wording_version"]
         conn.execute(
             "INSERT INTO decisions (claim_id, decision, payout_cents, reason, section,"
-            " steps, model, wording_version, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " steps, model, wording_version, created_at, sections, run_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 claim_id,
                 body.decision,
                 amount,
                 body.reason,
-                body.section,
+                section,
                 json.dumps(steps),
                 body.model,
                 wording,
                 clock.stamp(),
+                json.dumps(body.sections),
+                body.run_id,
             ),
         )
         over = body.decision == "approve" and amount > limit_cents(conn)
@@ -114,7 +145,7 @@ def record_decision(claim_id: str, body: Decision) -> dict[str, Any]:
 def pay_claim(claim_id: str, body: Payment) -> dict[str, Any]:
     """Pay an amount, blocked until a handler signs off when over the limit."""
     with db.connect() as conn:
-        store.claim_row(conn, claim_id)
+        holds(conn, body.run_id, claim_id)
         latest = store.latest_decision(conn, claim_id)
         amount = db.cents(body.amount)
         if latest is None or latest["decision"] != "approve":

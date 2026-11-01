@@ -114,7 +114,7 @@ def test_voice_model(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.delenv("MODEL_NAME", raising=False)
     monkeypatch.delenv("VOICE_MODEL_NAME", raising=False)
-    assert voice.model().model_name == "openai/gpt-6-luna"
+    assert voice.model().model_name == "deepseek/deepseek-v4.1-flash"
     monkeypatch.setenv("VOICE_MODEL_NAME", "openrouter/free")
     assert voice.model().model_name == "openrouter/free"
 

@@ -1,12 +1,20 @@
-"""The UnderCover Agent."""
+"""The UnderCover Agent: the claim agent, which works one claim."""
 
 import os
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
 from typing import Any, Literal
 
 import httpx
+import openai
 from dotenv import load_dotenv
 from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ModelRetryMiddleware,
+)
+from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import tool
@@ -18,9 +26,20 @@ load_dotenv(override=True)
 
 BACKEND_URL = "http://127.0.0.1:8000"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "openai/gpt-6-luna"
+DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
+RETRY_DELAY = 1.0
+PROVIDER_ERRORS = (
+    openai.APITimeoutError,
+    openai.APIConnectionError,
+    openai.RateLimitError,
+    openai.InternalServerError,
+)
 
 Step = dict[str, Any]
+
+
+class ClaimTimeout(Exception):
+    """The claim took longer than its time limit."""
 
 
 class Line(BaseModel):
@@ -53,8 +72,46 @@ def call(
 
 
 def model_name() -> str:
-    """Return the model named in MODEL_NAME, or GPT-6 Luna by default."""
+    """Return the model named in MODEL_NAME, or DeepSeek V4.1 Flash by default."""
     return os.getenv("MODEL_NAME") or DEFAULT_MODEL
+
+
+def setting(name: str, default: int) -> int:
+    """Return a whole-number setting from the environment."""
+    return int(os.getenv(name) or default)
+
+
+def run_id() -> str:
+    """Return the run this tool call belongs to, from the agent's config."""
+    return get_config().get("configurable", {})["thread_id"]
+
+
+def failure(error: Exception) -> str:
+    """Sort a failed claim run into provider, step_limit, time_limit or error."""
+    if isinstance(error, PROVIDER_ERRORS):
+        return "provider"
+    if isinstance(error, ModelCallLimitExceededError):
+        return "step_limit"
+    if isinstance(error, ClaimTimeout):
+        return "time_limit"
+    return "error"
+
+
+def describe(error: Exception) -> str:
+    """Return an error's message, or its type when it has none."""
+    return str(error) or type(error).__name__
+
+
+def retries() -> ModelRetryMiddleware:
+    """Retry provider errors three times, waiting longer each time."""
+    return ModelRetryMiddleware(
+        max_retries=3,
+        retry_on=PROVIDER_ERRORS,
+        on_failure="error",
+        initial_delay=RETRY_DELAY,
+        backoff_factor=2,
+        jitter=True,
+    )
 
 
 @tool
@@ -76,9 +133,23 @@ def get_customer_history(customer_id: str) -> Any:
 
 
 @tool
+def list_sections(source: Literal["wording", "manual"]) -> Any:
+    """List the numbered sections of the policy wording or the claims manual."""
+    return call("GET", f"/api/documents/{source}/sections")
+
+
+@tool
+def read_section(source: Literal["wording", "manual"], number: int) -> Any:
+    """Read one section of the policy wording or the claims manual."""
+    path = f"/api/documents/{source}/sections/{number}"
+    return call("GET", path, params={"run_id": run_id()})
+
+
+@tool
 def calculate_payout(claim_id: str, lines: list[Line], paid_by_others: float) -> Any:
     """Work out the payout for the lines to pay, under section 10 of the wording."""
     body = {
+        "run_id": run_id(),
         "lines": [Line.model_validate(line).model_dump() for line in lines],
         "paid_by_others": paid_by_others,
     }
@@ -91,14 +162,15 @@ def record_decision(
     decision: Literal["approve", "decline", "refer"],
     payout: float,
     reason: str,
-    section: str,
+    sections: list[str],
 ) -> Any:
-    """Record the decision, the payout, the reason and the section relied on."""
+    """Record the decision, the payout, the reason and the section ids relied on."""
     body = {
+        "run_id": run_id(),
         "decision": decision,
         "payout": payout,
         "reason": reason,
-        "section": section,
+        "sections": sections,
         "model": get_config().get("configurable", {}).get("model", model_name()),
     }
     return call("POST", f"/api/claims/{claim_id}/decision", body)
@@ -107,13 +179,16 @@ def record_decision(
 @tool
 def pay_claim(claim_id: str, amount: float) -> Any:
     """Pay an approved claim. Over $1,000.00 it waits for a handler's sign-off."""
-    return call("POST", f"/api/claims/{claim_id}/pay", {"amount": amount})
+    body = {"run_id": run_id(), "amount": amount}
+    return call("POST", f"/api/claims/{claim_id}/pay", body)
 
 
 TOOLS = [
     get_claim,
     get_policy,
     get_customer_history,
+    list_sections,
+    read_section,
     calculate_payout,
     record_decision,
     pay_claim,
@@ -121,24 +196,26 @@ TOOLS = [
 
 
 def model() -> ChatOpenAI:
-    """Return the chat model on OpenRouter."""
+    """Return the chat model on OpenRouter, with no retries of its own."""
     name = os.getenv("MODEL_NAME")
     return ChatOpenAI(
         model=name or DEFAULT_MODEL,
         base_url=OPENROUTER_BASE_URL,
         api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
         reasoning_effort=None if name else "low",
+        timeout=setting("MODEL_TIMEOUT_SECONDS", 60),
+        max_retries=0,
     )
 
 
-def system_prompt() -> str:
-    """Return the instructions and the policy wording, read from the backend."""
-    instructions = call("GET", "/api/instructions")["text"]
-    wording = call("GET", "/api/wording")
-    return (
-        f"{instructions}\n\n# Policy wording, version {wording['version']}\n\n"
-        f"{wording['text']}"
-    )
+def label(llm: BaseChatModel) -> str:
+    """Return the name of a chat model, as recorded on runs and decisions."""
+    return getattr(llm, "model_name", None) or llm._llm_type
+
+
+def tokens(message: AIMessage) -> int:
+    """Return the tokens a model reply used."""
+    return message.usage_metadata["total_tokens"] if message.usage_metadata else 0
 
 
 def steps(message: BaseMessage) -> list[Step]:
@@ -159,26 +236,61 @@ def steps(message: BaseMessage) -> list[Step]:
     return [{"kind": "message", "name": "agent", "detail": {"text": message.text}}]
 
 
+def stream(
+    agent: Any, prompt: str, config: dict[str, Any], deadline: float
+) -> Iterator[BaseMessage]:
+    """Yield each new message from an agent, failing once past the deadline."""
+    for update in agent.stream(
+        {"messages": [{"role": "user", "content": prompt}]},
+        config=config,
+        stream_mode="updates",
+    ):
+        for data in update.values():
+            yield from (data or {}).get("messages", [])
+        if time.monotonic() > deadline:
+            raise ClaimTimeout("The claim took longer than its time limit.")
+
+
+def report(
+    llm: BaseChatModel, message: BaseMessage, on_step: Callable[[Step], None] | None
+) -> None:
+    """Pass a message's steps, and a model reply's usage, to on_step."""
+    if not on_step:
+        return
+    if isinstance(message, AIMessage):
+        on_step(
+            {"kind": "usage", "name": label(llm), "detail": {"tokens": tokens(message)}}
+        )
+    for step in steps(message):
+        on_step(step)
+
+
 def run(
     claim_id: str,
     thread_id: str,
     llm: BaseChatModel | None = None,
     on_step: Callable[[Step], None] | None = None,
+    seconds: float = 120,
 ) -> str:
-    """Run the agent on one claim and return its final reply."""
+    """Run a fresh claim agent on one claim and return its final reply."""
     llm = llm or model()
-    label = getattr(llm, "model_name", None) or llm._llm_type
-    agent = create_agent(llm, tools=TOOLS, system_prompt=system_prompt())
+    middleware: list[AgentMiddleware[Any, Any, Any]] = [
+        retries(),
+        ModelCallLimitMiddleware(
+            run_limit=setting("CLAIM_STEP_LIMIT", 30), exit_behavior="error"
+        ),
+    ]
+    agent = create_agent(
+        llm,
+        tools=TOOLS,
+        system_prompt=call("GET", "/api/instructions")["claim"],
+        middleware=middleware,
+    )
+    config = {"configurable": {"thread_id": thread_id, "model": label(llm)}}
     reply = ""
-    for update in agent.stream(
-        {"messages": [{"role": "user", "content": f"Claim {claim_id}"}]},
-        config={"configurable": {"thread_id": thread_id, "model": label}},
-        stream_mode="updates",
+    for message in stream(
+        agent, f"Claim {claim_id}", config, time.monotonic() + seconds
     ):
-        for data in update.values():
-            for message in (data or {}).get("messages", []):
-                for step in steps(message):
-                    if on_step:
-                        on_step(step)
-                reply = message.text
+        report(llm, message, on_step)
+        reply = message.text
     return reply

@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from agent import main
 from backend import clock, db, runner, store
 
 router = APIRouter(prefix="/api")
@@ -36,8 +37,15 @@ def begin(claim_id: str) -> str:
 
 
 def record(run_id: str, step: dict[str, Any]) -> None:
-    """Store one step of a run's trace."""
+    """Store one step of a run's trace, or add a model call's usage to the run."""
     with db.connect() as conn:
+        if step["kind"] == "usage":
+            conn.execute(
+                "UPDATE runs SET tokens = tokens + ?, model_calls = model_calls + 1,"
+                " model = ? WHERE run_id = ?",
+                (step["detail"]["tokens"], step["name"], run_id),
+            )
+            return
         conn.execute(
             "INSERT INTO run_events (run_id, kind, name, detail, created_at)"
             " VALUES (?, ?, ?, ?, ?)",
@@ -51,16 +59,29 @@ def record(run_id: str, step: dict[str, Any]) -> None:
         )
 
 
-def finish(run_id: str, claim_id: str, error: str) -> None:
+def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> None:
     """End a run. A run that left its claim undecided has failed."""
     with db.connect() as conn:
-        if not error and store.claim_row(conn, claim_id)["state"] == "in_progress":
+        undecided = store.claim_row(conn, claim_id)["state"] == "in_progress"
+        if not error and undecided:
             error = "The agent finished without recording a decision."
-        if error and store.claim_row(conn, claim_id)["state"] == "in_progress":
+        if undecided:
             store.set_state(conn, claim_id, "waiting")
+            conn.execute(
+                "UPDATE claims SET failed_attempts = failed_attempts + 1"
+                " WHERE claim_id = ?",
+                (claim_id,),
+            )
         conn.execute(
-            "UPDATE runs SET status = ?, error = ?, ended_at = ? WHERE run_id = ?",
-            ("failed" if error else "succeeded", error, clock.stamp(), run_id),
+            "UPDATE runs SET status = ?, error = ?, failure = ?, ended_at = ?"
+            " WHERE run_id = ?",
+            (
+                "failed" if error else "succeeded",
+                error,
+                failure if error else "",
+                clock.stamp(),
+                run_id,
+            ),
         )
 
 
@@ -69,7 +90,7 @@ def work(run_id: str, claim_id: str) -> None:
     try:
         runner.execute(claim_id, run_id, lambda step: record(run_id, step))
     except Exception as error:  # noqa: BLE001 - a failed run must free its claim
-        finish(run_id, claim_id, str(error) or type(error).__name__)
+        finish(run_id, claim_id, main.describe(error), main.failure(error))
         return
     finish(run_id, claim_id, "")
 
@@ -79,7 +100,7 @@ def run_view(conn: Any, run_id: str) -> dict[str, Any]:
     row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
     if row is None:
         raise HTTPException(404, f"There is no run {run_id}.")
-    return dict(row)
+    return store.run_view(conn, row)
 
 
 @router.post("/claims/{claim_id}/runs", operation_id="start_run")

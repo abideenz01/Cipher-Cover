@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     id INTEGER PRIMARY KEY, claim_id TEXT NOT NULL, decision TEXT NOT NULL,
     payout_cents INTEGER NOT NULL, reason TEXT NOT NULL, section TEXT NOT NULL,
     steps TEXT NOT NULL, model TEXT NOT NULL, wording_version TEXT NOT NULL,
-    created_at TEXT NOT NULL);
+    created_at TEXT NOT NULL, sections TEXT NOT NULL, run_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY, claim_id TEXT NOT NULL, amount_cents INTEGER NOT NULL,
     created_at TEXT NOT NULL);

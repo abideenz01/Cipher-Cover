@@ -117,13 +117,21 @@ it("says when nothing is waiting", async () => {
   ).toBeDefined();
 });
 
-it("shows the instructions read only, with a copy button", async () => {
-  stubApi({ "GET /api/instructions": { text: "# The UnderCover Agent" } });
+it("shows both sets of instructions read only, with copy buttons", async () => {
+  stubApi({
+    "GET /api/instructions": {
+      queue: "# Running the queue",
+      claim: "# Working a claim",
+      fingerprint: "a1b2c3d4e5f6",
+    },
+  });
   const writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal("navigator", { clipboard: { writeText } });
   render(<Instructions />);
-  expect(await screen.findByText("# The UnderCover Agent")).toBeDefined();
-  fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-  expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
-  expect(writeText).toHaveBeenCalledWith("# The UnderCover Agent");
+  expect(await screen.findByText("# Running the queue")).toBeDefined();
+  expect(screen.getByText("# Working a claim")).toBeDefined();
+  expect(screen.getByText("Fingerprint a1b2c3d4e5f6")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "Copy Working a claim" }));
+  expect(await screen.findByText("Copied")).toBeDefined();
+  expect(writeText).toHaveBeenCalledWith("# Working a claim");
 });

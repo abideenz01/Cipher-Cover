@@ -2,11 +2,14 @@
 
 import json
 import sqlite3
+from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
 
-from backend import clock, db
+from backend import clock, db, sections
+
+FAILURES_FOR_HANDLER = 2
 
 
 def short_name(name: str) -> str:
@@ -67,6 +70,10 @@ def decision_view(row: sqlite3.Row) -> dict[str, Any]:
         "payout": db.dollars(row["payout_cents"]),
         "reason": row["reason"],
         "section": row["section"],
+        "sections": [
+            {"id": s, "title": sections.title(s)} for s in json.loads(row["sections"])
+        ],
+        "run_id": row["run_id"],
         "steps": json.loads(row["steps"]),
         "model": row["model"],
         "wording_version": row["wording_version"],
@@ -119,9 +126,24 @@ def live_run(conn: sqlite3.Connection, run_id: str) -> sqlite3.Row:
     return row
 
 
-def sections_read(conn: sqlite3.Connection, run_id: str) -> list[str]:
+def read_sections(conn: sqlite3.Connection, run_id: str) -> list[str]:
     """Return the sections a run has read, in order, without repeats."""
     rows = conn.execute(
         "SELECT section_id FROM section_reads WHERE run_id = ? ORDER BY id", (run_id,)
     ).fetchall()
     return list(dict.fromkeys(r["section_id"] for r in rows))
+
+
+def run_view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    """Return a claim run with the sections it read and how long it took."""
+    ended = row["ended_at"] or clock.stamp()
+    seconds = (
+        datetime.fromisoformat(ended) - datetime.fromisoformat(row["started_at"])
+    ).total_seconds()
+    return dict(row) | {
+        "seconds": round(seconds),
+        "sections_read": [
+            {"id": s, "title": sections.title(s)}
+            for s in read_sections(conn, row["run_id"])
+        ],
+    }

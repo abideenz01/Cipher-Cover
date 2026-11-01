@@ -100,17 +100,17 @@ Build:
 
 Success criteria:
 
-- [ ] `model_name()` is `deepseek/deepseek-v4.1-flash` when `MODEL_NAME` is unset and `openrouter/free` when it's set to that. The model is built with `reasoning_effort="low"` and `max_retries=0`.
-- [ ] A stub run on CLM-1001 ends `succeeded`. Its trace includes `read_section` and the claim's run lists `wording-10` among its sections read. The decision stores `sections == ["wording-10"]` and the run id.
-- [ ] The system prompt no longer contains the wording: it's shorter than the instructions plus 500 characters.
-- [ ] A `FaultyModel` that raises a rate limit error twice and then answers ends `succeeded` after 2 retries, with no failed attempt. One that keeps raising 5xx ends `failed` with failure `provider`, and the claim is `waiting` with `failed_attempts == 1`. Tests pass `initial_delay=0`, so they don't wait.
-- [ ] A `FaultyModel` that loops past `CLAIM_STEP_LIMIT=5` ends `failed` with `step_limit`. A clock moved past the time limit ends `failed` with `time_limit`.
-- [ ] `record_decision` with a run id from another claim, from a finished run, or with no run is refused with 409. So are `calculate_payout` and `pay_claim`.
-- [ ] A decision citing `manual-9` when the run read only `wording-10` is refused with a detail naming `manual-9`. A `FaultyModel` that makes that mistake once and then reads the section and decides again ends `succeeded`.
-- [ ] Recording a second decision on a decided claim, and paying a paid claim, are both refused with 409.
-- [ ] Each model step's tokens are summed onto the run: a stub reporting 100 tokens per call over 7 calls shows `tokens == 700` and `model_calls == 7`.
-- [ ] `get_instructions` returns both texts and a 12-character fingerprint. Neither text mentions `data/evals`, and a test checks that no file under `agent/` or `backend/` opens `data/evals`.
-- [ ] `npm run check:python` passes. Commit.
+- [x] `model_name()` is `deepseek/deepseek-v4.1-flash` when `MODEL_NAME` is unset and `openrouter/free` when it's set to that. The model is built with `reasoning_effort="low"` and `max_retries=0`.
+- [x] A stub run on CLM-1001 ends `succeeded`. Its trace includes `read_section` and the claim's run lists `wording-10` among its sections read. The decision stores `sections == ["wording-10"]` and the run id.
+- [x] The system prompt no longer contains the wording: it's shorter than the instructions plus 500 characters.
+- [x] A `FaultyModel` that raises a rate limit error twice and then answers ends `succeeded` after 2 retries, with no failed attempt. One that keeps raising 5xx ends `failed` with failure `provider`, and the claim is `waiting` with `failed_attempts == 1`. Tests pass `initial_delay=0`, so they don't wait.
+- [x] A `FaultyModel` that loops past `CLAIM_STEP_LIMIT=5` ends `failed` with `step_limit`. A clock moved past the time limit ends `failed` with `time_limit`.
+- [x] `record_decision` with a run id from another claim, from a finished run, or with no run is refused with 409. So are `calculate_payout` and `pay_claim`.
+- [x] A decision citing `manual-9` when the run read only `wording-10` is refused with a detail naming `manual-9`. A `FaultyModel` that makes that mistake once and then reads the section and decides again ends `succeeded`.
+- [x] Recording a second decision on a decided claim, and paying a paid claim, are both refused with 409.
+- [x] Each model step's tokens are summed onto the run: a stub reporting 100 tokens per call over its 8 calls shows `tokens == 800` and `model_calls == 8`.
+- [x] `get_instructions` returns both texts and a 12-character fingerprint. Neither text mentions `data/evals`, and a test checks that no file under `agent/` or `backend/` opens `data/evals`.
+- [x] `npm run check:python` passes. Commit.
 
 ## Phase 3: Queue runs in the backend
 

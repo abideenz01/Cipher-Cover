@@ -1,5 +1,6 @@
 """Reading claims, policies, customers, handlers, the wording and instructions."""
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -10,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from backend import db, seed, store
 
 router = APIRouter(prefix="/api")
-INSTRUCTIONS = Path(__file__).parent / "instructions.md"
+INSTRUCTIONS = Path(__file__).parent
 
 
 def summary(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
@@ -29,6 +30,8 @@ def summary(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         "amount_claimed": data["amount_claimed"],
         "state": row["state"],
         "state_since": row["state_since"],
+        "failed_attempts": row["failed_attempts"],
+        "left_for_handler": row["failed_attempts"] >= store.FAILURES_FOR_HANDLER,
         "decision": latest["decision"] if latest else "",
         "payout": db.dollars(latest["payout_cents"]) if latest else 0.0,
         "paid": db.dollars(store.paid_cents(conn, row["claim_id"])),
@@ -67,7 +70,7 @@ def get_claim(claim_id: str) -> dict[str, Any]:
             "items": data["items"],
             "documents": data["documents"],
             "decisions": [store.decision_view(d) for d in decisions],
-            "runs": [dict(r) for r in runs],
+            "runs": [store.run_view(conn, r) for r in runs],
             "sendbacks": [dict(s) for s in sendbacks],
         }
 
@@ -106,10 +109,18 @@ def get_policy_wording() -> dict[str, str]:
     return {"version": version, "text": text}
 
 
+def instructions() -> dict[str, str]:
+    """Return the instructions for running the queue and for working a claim."""
+    queue = (INSTRUCTIONS / "instructions_queue.md").read_text(encoding="utf-8")
+    claim = (INSTRUCTIONS / "instructions_claim.md").read_text(encoding="utf-8")
+    digest = hashlib.sha256((queue + claim).encode()).hexdigest()
+    return {"queue": queue, "claim": claim, "fingerprint": digest[:12]}
+
+
 @router.get("/instructions", operation_id="get_instructions")
 def get_instructions() -> dict[str, str]:
-    """Return the agent's instructions."""
-    return {"text": INSTRUCTIONS.read_text(encoding="utf-8")}
+    """Return the agent's instructions for the queue and for a claim."""
+    return instructions()
 
 
 @router.get("/handlers", operation_id="list_handlers")

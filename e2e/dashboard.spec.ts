@@ -83,8 +83,11 @@ test("send back returns a claim to Waiting", async ({ page }) => {
 
 test("the instructions are shown read only", async ({ page }) => {
   await page.goto("/#/instructions");
-  await expect(page.locator(".instructions")).toContainText(
-    "# The UnderCover Agent",
+  await expect(page.locator(".instructions").first()).toContainText(
+    "# The UnderCover Agent: running the queue",
+  );
+  await expect(page.locator(".instructions").nth(1)).toContainText(
+    "# The UnderCover Agent: working a claim",
   );
 });
 

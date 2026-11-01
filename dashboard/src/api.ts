@@ -87,6 +87,12 @@ export interface TraceEvent {
   created_at: string;
 }
 
+export interface AgentInstructions {
+  queue: string;
+  claim: string;
+  fingerprint: string;
+}
+
 export interface Handler {
   handler_id: string;
   name: string;
@@ -158,7 +164,7 @@ export const api = {
   getRun: (runId: string) => request<Run>(`/api/runs/${runId}`),
   listRunEvents: (runId: string) =>
     request<TraceEvent[]>(`/api/runs/${runId}/events`),
-  getInstructions: () => request<{ text: string }>("/api/instructions"),
+  getInstructions: () => request<AgentInstructions>("/api/instructions"),
   getVoiceConfig: () => request<VoiceConfig>("/api/voice/config"),
   voiceTurn: (sessionId: string, handlerId: string, text: string) =>
     post<VoiceResult>("/api/voice/turn", {

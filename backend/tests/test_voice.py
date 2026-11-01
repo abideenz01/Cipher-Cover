@@ -100,14 +100,19 @@ def test_search():
 
 def test_decision_and_run_briefs(waiting):
     brief = client.get("/api/claims/CLM-1011/decision-brief").json()
-    assert brief["reply"] == "CLM-1011 was approved for $1,500.00 under Section 5."
+    assert brief["reply"] == (
+        "CLM-1011 was approved for $1,500.00 under"
+        " Section 5. Baggage and Personal Effects."
+    )
     none = client.get("/api/claims/CLM-1001/decision-brief").json()
     assert none["reply"] == "CLM-1001 has no decision yet."
-    decide("CLM-1001", "refer", 0)
-    referred = client.get("/api/claims/CLM-1001/decision-brief").json()
-    assert referred["reply"] == "CLM-1001 was referred under Section 5."
     run = client.get("/api/claims/CLM-1001/run-status").json()
     assert run["reply"] == "CLM-1001 has not been run yet."
+    decide("CLM-1001", "refer", 0)
+    referred = client.get("/api/claims/CLM-1001/decision-brief").json()
+    assert referred["reply"] == (
+        "CLM-1001 was referred under Section 5. Baggage and Personal Effects."
+    )
 
 
 def test_analytics_brief(waiting):
