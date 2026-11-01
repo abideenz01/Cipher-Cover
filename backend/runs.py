@@ -26,7 +26,9 @@ def begin(claim_id: str) -> str:
         if claim["state"] != "waiting":
             raise HTTPException(409, f"Claim {claim_id} is not waiting.")
         conn.execute(
-            "INSERT INTO runs VALUES (?, ?, 'running', '', ?, '')",
+            "INSERT INTO runs (run_id, claim_id, status, error, started_at, ended_at,"
+            " queue_run_id, attempt, failure, tokens, model_calls, model)"
+            " VALUES (?, ?, 'running', '', ?, '', '', 1, '', 0, 0, '')",
             (run_id, claim_id, clock.stamp()),
         )
         store.set_state(conn, claim_id, "in_progress")

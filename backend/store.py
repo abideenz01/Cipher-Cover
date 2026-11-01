@@ -109,3 +109,19 @@ def decided(conn: sqlite3.Connection, claim_id: str) -> sqlite3.Row:
     if row is None:
         raise HTTPException(409, f"Claim {claim_id} has no decision.")
     return row
+
+
+def live_run(conn: sqlite3.Connection, run_id: str) -> sqlite3.Row:
+    """Return a claim run that is still running, or raise 409."""
+    row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+    if row is None or row["status"] != "running":
+        raise HTTPException(409, f"There is no live claim run {run_id}.")
+    return row
+
+
+def sections_read(conn: sqlite3.Connection, run_id: str) -> list[str]:
+    """Return the sections a run has read, in order, without repeats."""
+    rows = conn.execute(
+        "SELECT section_id FROM section_reads WHERE run_id = ? ORDER BY id", (run_id,)
+    ).fetchall()
+    return list(dict.fromkeys(r["section_id"] for r in rows))

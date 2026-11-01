@@ -13,13 +13,14 @@ Kept up to date as `docs/PROCESS.md` asks: updated at the end of every phase and
 - `agent/`: `run(claim_id, thread_id, llm=None, on_step=None)` in `agent/main.py`, with six tools over the API. `agent/stub.py` is a scripted model for tests that approves and pays every item.
 - `dashboard/`: the Cipher Cover console from `BRAND.md`. A rail (Queue, Sign-off, Instructions), a command bar (`/` to search, theme switch, Run all waiting), a metric strip, a four-column board and a claim drawer with Overview, Documents, Decision and Trace tabs. The board polls every two seconds; the trace polls every second while a run is live. Styles are all in `dashboard/src/theme.css`.
 - `dashboard/src/voice/`: voice in the dashboard. A mic button in the command bar (hold it or hold `V` to talk, a tap for hands-free, Escape stops speech), a captions panel with the acting handler and a Type instead field, and a one-time consent notice. `focus_signoff` highlights the claim on the Sign-off view with a Confirm button; only that click signs off. With voice off there is no mic and no panel. Speech uses the browser's own recognition and synthesis (Chrome or Edge); `VOICE_PROVIDER=stub` is for Playwright.
+- `backend/documents.py`: `list_sections` and `read_section` split the policy wording and the claims manual on their numbered headings (`wording-5`, `manual-9`). Each read is recorded in `section_reads` against a live claim run.
 - `e2e/`: Playwright tests of the dashboard against a backend on a fresh temporary database with `AGENT_STUB=1`.
 - `docs/screens/`: screenshots of the dashboard in dark and light mode.
 
 ## How to run it
 
 - `uv sync` and `npm install`, then `npm run dev` for the backend on port 8000 and the dashboard on port 5173.
-- The database is `undercover.db` at the repo root, or `DB_PATH` if set. `uv run -m backend.seed --reset` rebuilds it from `data/`.
+- The database is `undercover.db` at the repo root, or `DB_PATH` if set. `uv run -m backend.seed --reset` rebuilds it from `data/`. The harness changes the schema, so a database from the pilot must be rebuilt this way.
 - `npm run check` runs every check.
 - To try voice, set `VOICE_ENABLED=1` in `.env` and open the dashboard in Chrome or Edge. `.env.example` lists the voice settings.
 - The agent calls the backend at `http://127.0.0.1:8000`, not `localhost`: on Windows, `localhost` tries IPv6 first and adds about two seconds to every call.
@@ -32,7 +33,18 @@ Kept up to date as `docs/PROCESS.md` asks: updated at the end of every phase and
 
 ## Phases
 
-The plan is in `docs/PLAN.md`. The earlier plan is kept in `docs/PLAN_EXTENDED.md`.
+The harness plan is in `docs/PLAN_HARNESS.md`.
+
+| Harness phase | State |
+|---|---|
+| 1 Sections of the wording and the manual | Done |
+| 2 The claim agent, hardened | Not started |
+| 3 Queue runs in the backend | Not started |
+| 4 The queue agent | Not started |
+| 5 The dashboard | Not started |
+| 6 A live run and the docs | Not started |
+
+The pilot's plan is in `docs/PLAN.md`. The earlier plan is kept in `docs/PLAN_EXTENDED.md`.
 
 | Phase | State |
 |---|---|

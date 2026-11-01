@@ -57,7 +57,8 @@ def seed(reset: bool = False) -> None:
         )
         now = clock.stamp()
         conn.executemany(
-            "INSERT INTO claims VALUES (?, ?, ?, ?, 'waiting', ?)",
+            "INSERT INTO claims (claim_id, policy_id, customer_id, data, state,"
+            " state_since) VALUES (?, ?, ?, ?, 'waiting', ?)",
             [
                 (c["claim_id"], c["policy_id"], c["customer_id"], json.dumps(c), now)
                 for c in load("claims.json")

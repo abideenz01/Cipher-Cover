@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS handlers (
     can_approve_over_limit INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS claims (
     claim_id TEXT PRIMARY KEY, policy_id TEXT NOT NULL, customer_id TEXT NOT NULL,
-    data TEXT NOT NULL, state TEXT NOT NULL, state_since TEXT NOT NULL);
+    data TEXT NOT NULL, state TEXT NOT NULL, state_since TEXT NOT NULL,
+    failed_attempts INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS calculations (
     id INTEGER PRIMARY KEY, claim_id TEXT NOT NULL, payout_cents INTEGER NOT NULL,
     steps TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -38,7 +39,12 @@ CREATE TABLE IF NOT EXISTS sendbacks (
     reason TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY, claim_id TEXT NOT NULL, status TEXT NOT NULL,
-    error TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT NOT NULL);
+    error TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT NOT NULL,
+    queue_run_id TEXT NOT NULL, attempt INTEGER NOT NULL, failure TEXT NOT NULL,
+    tokens INTEGER NOT NULL, model_calls INTEGER NOT NULL, model TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS section_reads (
+    id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, section_id TEXT NOT NULL,
+    created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS run_events (
     id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, kind TEXT NOT NULL,
     name TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL);
