@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -13,7 +15,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def local_backend(monkeypatch):
     monkeypatch.setenv("VOICE_ENABLED", "1")
-    monkeypatch.setattr(main, "backend", lambda: TestClient(app))
+    monkeypatch.setattr(main, "backend", lambda: nullcontext(client))
     routes.TURNS.clear()
 
 

@@ -1,4 +1,4 @@
-"""Runs the UnderCover Agent on one claim. Tests replace execute."""
+"""Runs the UnderCover Agent. Tests replace execute and execute_queue."""
 
 import os
 from collections.abc import Callable
@@ -17,3 +17,10 @@ def execute(
     with db.connect() as conn:
         seconds = db.reference(conn, "company")["agent_run_timeout_seconds"]
     main.run(claim_id, run_id, llm, on_step, seconds)
+
+
+def execute_queue(run_id: str, on_step: Callable[[str, dict[str, Any]], None]) -> None:
+    """Run the queue agent on a queue run."""
+    raise NotImplementedError(
+        f"The queue agent is not built yet ({run_id}, {on_step})."
+    )

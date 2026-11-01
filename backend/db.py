@@ -42,6 +42,13 @@ CREATE TABLE IF NOT EXISTS runs (
     error TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT NOT NULL,
     queue_run_id TEXT NOT NULL, attempt INTEGER NOT NULL, failure TEXT NOT NULL,
     tokens INTEGER NOT NULL, model_calls INTEGER NOT NULL, model TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS queue_runs (
+    run_id TEXT PRIMARY KEY, status TEXT NOT NULL, cap INTEGER NOT NULL,
+    limits TEXT NOT NULL, model TEXT NOT NULL, reasoning_effort TEXT NOT NULL,
+    fingerprint TEXT NOT NULL, todos TEXT NOT NULL, summary TEXT NOT NULL,
+    stop_reason TEXT NOT NULL, error TEXT NOT NULL, tokens INTEGER NOT NULL,
+    model_calls INTEGER NOT NULL, provider_failures INTEGER NOT NULL,
+    started_at TEXT NOT NULL, ended_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS section_reads (
     id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, section_id TEXT NOT NULL,
     created_at TEXT NOT NULL);

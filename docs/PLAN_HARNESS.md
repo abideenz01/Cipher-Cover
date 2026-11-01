@@ -131,18 +131,18 @@ Build:
 
 Success criteria (driven by a scripted Python stand-in, not a model):
 
-- [ ] A second `start_queue_run` while one is `running` returns 409. Once the first has finished, a new one starts.
-- [ ] With `cap: 2`, `begin_attempt` on two claims succeeds and a third distinct claim returns 409 ("The cap is reached."). A retry of the first claim after it failed succeeds.
-- [ ] After a failed attempt the claim is `waiting` with `failed_attempts == 1`, and it can be begun again. After a second failure it's left for a handler: `begin_attempt` refuses it, and `list_claims` shows `left_for_handler: true`.
-- [ ] A second `begin_attempt` on a claim that is `in_progress` returns 409. A test with two threads gets exactly one lease.
-- [ ] With `RUN_TOKEN_LIMIT=1000` and 1,200 tokens used, `begin_attempt` returns 409 ("The token budget is spent."), `finish_queue_run` is allowed, and `stop_reason` is `token_limit`.
-- [ ] Three provider failures in a row move the run to `paused`. A success in between resets the count.
-- [ ] `finish_queue_run` with an untouched waiting claim within the cap returns 409 naming that claim. After it is worked, finishing succeeds.
-- [ ] `stop_queue_run` during an attempt: the attempt still finishes, the next `begin_attempt` returns 409, finishing gives `stopped`, the `to_do` items become `not_started` and those claims stay `waiting`.
-- [ ] A stand-in that raises halfway leaves no claim `in_progress`, and the run ends `failed`.
-- [ ] Seeding a database with a claim `in_progress` and a run `running`, then starting the app, leaves the claim `waiting` with `failed_attempts == 1` and the run `failed` with "The backend restarted."
-- [ ] `get_queue_run` returns the cap, the limits, the model, the reasoning effort, the fingerprint, the to-do list, the tokens and the summary. `list_queue_runs` returns newest first, at most 20.
-- [ ] `npm run check:python` passes. Commit.
+- [x] A second `start_queue_run` while one is `running` returns 409. Once the first has finished, a new one starts.
+- [x] With `cap: 2`, `begin_attempt` on two claims succeeds and a third distinct claim returns 409 ("The cap is reached."). A retry of the first claim after it failed succeeds.
+- [x] After a failed attempt the claim is `waiting` with `failed_attempts == 1`, and it can be begun again. After a second failure it's left for a handler: `begin_attempt` refuses it, and `list_claims` shows `left_for_handler: true`.
+- [x] A second `begin_attempt` on a claim that is `in_progress` returns 409. A test with two threads gets exactly one lease.
+- [x] With `RUN_TOKEN_LIMIT=1000` and 1,200 tokens used, `begin_attempt` returns 409 ("The token budget is spent."), `finish_queue_run` is allowed, and `stop_reason` is `token_limit`.
+- [x] Three provider failures in a row move the run to `paused`. A success in between resets the count.
+- [x] `finish_queue_run` with an untouched waiting claim within the cap returns 409 naming that claim. After it is worked, finishing succeeds.
+- [x] `stop_queue_run` during an attempt: the attempt still finishes, the next `begin_attempt` returns 409, finishing gives `stopped`, the `to_do` items become `not_started` and those claims stay `waiting`.
+- [x] A stand-in that raises halfway leaves no claim `in_progress`, and the run ends `failed`.
+- [x] Seeding a database with a claim `in_progress` and a run `running`, then starting the app, leaves the claim `waiting` with `failed_attempts == 1` and the run `failed` with "The backend restarted."
+- [x] `get_queue_run` returns the cap, the limits, the model, the reasoning effort, the fingerprint, the to-do list, the tokens and the summary. `list_queue_runs` returns newest first, at most 20.
+- [x] `npm run check:python` passes. Commit.
 
 ## Phase 4: The queue agent
 

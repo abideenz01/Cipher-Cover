@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from pathlib import Path
 
 import httpx2
@@ -39,7 +40,7 @@ def server_error():
 
 @pytest.fixture(autouse=True)
 def local_backend(monkeypatch):
-    monkeypatch.setattr(main, "backend", lambda: TestClient(app))
+    monkeypatch.setattr(main, "backend", lambda: nullcontext(client))
     monkeypatch.setattr(main, "RETRY_DELAY", 0)
     monkeypatch.setattr(runs, "spawn", lambda work: work())
 

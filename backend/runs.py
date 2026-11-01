@@ -1,6 +1,7 @@
 """Agent runs on claims and their trace."""
 
 import json
+import sqlite3
 import threading
 import uuid
 from collections.abc import Callable
@@ -19,31 +20,54 @@ def spawn(work: Callable[[], None]) -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
-def begin(claim_id: str) -> str:
-    """Create a run and move its claim to in progress."""
+def lease(conn: sqlite3.Connection, claim_id: str, queue_run_id: str) -> str:
+    """Move a waiting claim to in progress under a new claim run, or raise 409.
+
+    The claim is taken in one conditional update, so two callers can never both
+    take it.
+    """
+    store.claim_row(conn, claim_id)
+    taken = conn.execute(
+        "UPDATE claims SET state = 'in_progress', state_since = ?"
+        " WHERE claim_id = ? AND state = 'waiting'",
+        (clock.stamp(), claim_id),
+    ).rowcount
+    if not taken:
+        raise HTTPException(409, f"Claim {claim_id} is not waiting.")
+    attempt = conn.execute(
+        "SELECT COUNT(*) FROM runs WHERE claim_id = ?", (claim_id,)
+    ).fetchone()[0]
     run_id = uuid.uuid4().hex
-    with db.connect() as conn:
-        claim = store.claim_row(conn, claim_id)
-        if claim["state"] != "waiting":
-            raise HTTPException(409, f"Claim {claim_id} is not waiting.")
-        conn.execute(
-            "INSERT INTO runs (run_id, claim_id, status, error, started_at, ended_at,"
-            " queue_run_id, attempt, failure, tokens, model_calls, model)"
-            " VALUES (?, ?, 'running', '', ?, '', '', 1, '', 0, 0, '')",
-            (run_id, claim_id, clock.stamp()),
-        )
-        store.set_state(conn, claim_id, "in_progress")
+    conn.execute(
+        "INSERT INTO runs (run_id, claim_id, status, error, started_at, ended_at,"
+        " queue_run_id, attempt, failure, tokens, model_calls, model)"
+        " VALUES (?, ?, 'running', '', ?, '', ?, ?, '', 0, 0, '')",
+        (run_id, claim_id, clock.stamp(), queue_run_id, attempt + 1),
+    )
     return run_id
 
 
+def begin(claim_id: str) -> str:
+    """Create a claim run on its own and move its claim to in progress."""
+    with db.connect() as conn:
+        return lease(conn, claim_id, "")
+
+
 def record(run_id: str, step: dict[str, Any]) -> None:
-    """Store one step of a run's trace, or add a model call's usage to the run."""
+    """Store one step of a trace, or add a model call's usage to its run.
+
+    The run is a claim run or a queue run; both keep their steps in run_events.
+    """
     with db.connect() as conn:
         if step["kind"] == "usage":
+            for table in ("runs", "queue_runs"):
+                conn.execute(
+                    f"UPDATE {table} SET tokens = tokens + ?,"  # noqa: S608 - fixed names
+                    " model_calls = model_calls + 1 WHERE run_id = ?",
+                    (step["detail"]["tokens"], run_id),
+                )
             conn.execute(
-                "UPDATE runs SET tokens = tokens + ?, model_calls = model_calls + 1,"
-                " model = ? WHERE run_id = ?",
-                (step["detail"]["tokens"], step["name"], run_id),
+                "UPDATE runs SET model = ? WHERE run_id = ?", (step["name"], run_id)
             )
             return
         conn.execute(
@@ -111,26 +135,6 @@ def start_run(claim_id: str) -> dict[str, Any]:
     return {"run_id": run_id, "claim_id": claim_id, "status": "running"}
 
 
-@router.post("/runs", operation_id="start_queue_run")
-def start_queue_run() -> dict[str, list[str]]:
-    """Start the agent on every waiting claim, one at a time."""
-    with db.connect() as conn:
-        rows = conn.execute(
-            "SELECT claim_id FROM claims WHERE state = 'waiting' ORDER BY claim_id"
-        ).fetchall()
-    claim_ids = [r["claim_id"] for r in rows]
-
-    def work_queue() -> None:
-        for claim_id in claim_ids:
-            with db.connect() as conn:
-                if store.claim_row(conn, claim_id)["state"] != "waiting":
-                    continue
-            work(begin(claim_id), claim_id)
-
-    spawn(work_queue)
-    return {"claim_ids": claim_ids}
-
-
 @router.get("/runs/{run_id}", operation_id="get_run")
 def get_run(run_id: str) -> dict[str, Any]:
     """Return a run's status and outcome."""
@@ -138,11 +142,9 @@ def get_run(run_id: str) -> dict[str, Any]:
         return run_view(conn, run_id)
 
 
-@router.get("/runs/{run_id}/events", operation_id="list_run_events")
-def list_run_events(run_id: str) -> list[dict[str, Any]]:
-    """Return the run's trace so far."""
+def events(run_id: str) -> list[dict[str, Any]]:
+    """Return a run's stored steps in order."""
     with db.connect() as conn:
-        run_view(conn, run_id)
         rows = conn.execute(
             "SELECT * FROM run_events WHERE run_id = ? ORDER BY id", (run_id,)
         ).fetchall()
@@ -155,3 +157,11 @@ def list_run_events(run_id: str) -> list[dict[str, Any]]:
         }
         for r in rows
     ]
+
+
+@router.get("/runs/{run_id}/events", operation_id="list_run_events")
+def list_run_events(run_id: str) -> list[dict[str, Any]]:
+    """Return the run's trace so far."""
+    with db.connect() as conn:
+        run_view(conn, run_id)
+    return events(run_id)

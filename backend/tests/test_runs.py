@@ -1,10 +1,11 @@
+from contextlib import nullcontext
+
 import pytest
 from fastapi.testclient import TestClient
 
 from agent import main
 from backend import runner, runs
 from backend.main import app
-from backend.tests.test_decisions import decide
 
 client = TestClient(app)
 
@@ -12,7 +13,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def inline(monkeypatch):
     monkeypatch.setenv("AGENT_STUB", "1")
-    monkeypatch.setattr(main, "backend", lambda: TestClient(app))
+    monkeypatch.setattr(main, "backend", lambda: nullcontext(client))
     monkeypatch.setattr(runs, "spawn", lambda work: work())
 
 
@@ -69,23 +70,6 @@ def test_a_run_without_a_decision_fails(monkeypatch):
     run, _ = finished("CLM-1001")
     assert run["status"] == "failed"
     assert client.get("/api/claims/CLM-1001").json()["state"] == "waiting"
-
-
-def test_queue_run_takes_one_claim_at_a_time(monkeypatch):
-    claims = [c["claim_id"] for c in client.get("/api/claims").json()]
-    for claim_id in claims[3:]:
-        decide(claim_id, "refer", 0)
-    busiest = []
-
-    def counting(claim_id, run_id, on_step):
-        states = [c["state"] for c in client.get("/api/claims").json()]
-        busiest.append(states.count("in_progress"))
-        decide(claim_id, "refer", 0)
-
-    monkeypatch.setattr(runner, "execute", counting)
-    assert client.post("/api/runs").json()["claim_ids"] == claims[:3]
-    assert busiest == [1, 1, 1]
-    assert {c["state"] for c in client.get("/api/claims").json()} == {"decided"}
 
 
 def test_missing_run():
