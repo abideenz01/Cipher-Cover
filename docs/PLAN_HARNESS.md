@@ -205,11 +205,11 @@ Build and check:
 
 Success criteria:
 
-- [ ] The live run works exactly 5 claims and ends `succeeded`. The other 30 claims stay `waiting`. The model on the run and its decisions is `deepseek/deepseek-v4.1-flash`.
-- [ ] In the browser, the to-do list fills in and is ticked off as the run goes. Each of the 5 claims shows its steps and the sections it read, including at least one manual section. The summary shows the tokens and time used, and the run appears in the history. The tokens are recorded in `docs/STATUS.md`.
-- [ ] No claim is `in_progress` after the run, and no claim has more than one decision or payment.
-- [ ] `docs/SPEC.md`, `docs/TECH_STACK.md` and `docs/STATUS.md` describe the product as it now is.
-- [ ] `npm run check` passes. Commit.
+- [x] The live run works exactly 5 claims and ends `succeeded`. The other 30 claims stay `waiting`. The model on the run and its decisions is `deepseek/deepseek-v4.1-flash`.
+- [x] In the browser, the to-do list fills in and is ticked off as the run goes. Each of the 5 claims shows its steps and the sections it read, including at least one manual section. The summary shows the tokens and time used, and the run appears in the history. The tokens are recorded in `docs/STATUS.md`.
+- [x] No claim is `in_progress` after the run, and no claim has more than one decision or payment.
+- [x] `docs/SPEC.md`, `docs/TECH_STACK.md` and `docs/STATUS.md` describe the product as it now is.
+- [x] `npm run check` passes. Commit.
 
 ## Final report
 

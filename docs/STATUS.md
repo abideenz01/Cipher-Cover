@@ -26,6 +26,7 @@ Kept up to date as `docs/PROCESS.md` asks: updated at the end of every phase and
 - `uv sync` and `npm install`, then `npm run dev` for the backend on port 8000 and the dashboard on port 5173.
 - The database is `undercover.db` at the repo root, or `DB_PATH` if set. `uv run -m backend.seed --reset` rebuilds it from `data/`. The harness changes the schema, so a database from the pilot must be rebuilt this way.
 - `npm run check` runs every check.
+- To run the queue, set the number of claims in the command bar and press Run, or `curl -X POST http://127.0.0.1:8000/api/runs -H "Content-Type: application/json" -d "{\"cap\": 5}"`. The limits are settings in `.env` (see `.env.example`): `CLAIM_STEP_LIMIT` (30 model calls a claim), `RUN_TOKEN_LIMIT` (1,000,000 tokens a run), `PROVIDER_FAILURES_TO_PAUSE` (3) and `MODEL_TIMEOUT_SECONDS` (60); the time on one claim is `agent_run_timeout_seconds` (120) in `data/company.json`.
 - To try voice, set `VOICE_ENABLED=1` in `.env` and open the dashboard in Chrome or Edge. `.env.example` lists the voice settings.
 - The agent calls the backend at `http://127.0.0.1:8000`, not `localhost`: on Windows, `localhost` tries IPv6 first and adds about two seconds to every call.
 
@@ -46,7 +47,7 @@ The harness plan is in `docs/PLAN_HARNESS.md`.
 | 3 Queue runs in the backend | Done |
 | 4 The queue agent | Done |
 | 5 The dashboard | Done |
-| 6 A live run and the docs | Not started |
+| 6 A live run and the docs | Done |
 
 The pilot's plan is in `docs/PLAN.md`. The earlier plan is kept in `docs/PLAN_EXTENDED.md`.
 
@@ -65,4 +66,5 @@ The pilot's plan is in `docs/PLAN.md`. The earlier plan is kept in `docs/PLAN_EX
 | Check | Result |
 |---|---|
 | Real model run on CLM-1001 | 2026-10-30, `openai/gpt-6-luna`: approve, $420.00, paid. Section 3. Trip Delay. Reason: a crew cancellation delayed the departure past the Premium six-hour waiting period, and the receipts support the hotel, meals and taxis. Its first parallel calls guessed the policy and customer ids from the claim id, then it corrected itself from the 404 replies. |
+| Live queue run, harness | 2026-11-01, after reseeding, a run capped at 5 on `deepseek/deepseek-v4.1-flash` (low): it ordered the claims itself (CLM-1001, 1002, 1004, 1005, then 1003), worked all 5 on the first attempt, and ended `succeeded` at its cap in 2 min 7 s with 357,530 tokens (78,874 for the queue agent, about 50,000 to 61,000 per claim). Four approvals paid ($420.00, $580.00, $186.00, $243.00); CLM-1003, $3,750.00, waits for sign-off. The other 30 claims stayed waiting, nothing was left in progress, and no claim has more than one decision or payment. Each claim read 10 to 13 sections, manual sections included, and cited 6 to 9. The dashboard showed the to-do list fill in and tick off as the run went (`docs/screens/run-live-dark.png`, `run-finished-dark.png`, `trace-dark.png`). Two things to watch: the claims read more sections than they needed, which is most of their tokens, and some reasons run to four sentences rather than two or three. |
 | Voice in the browser, misheard claim numbers and reply time | Not done yet: it needs a person with a real microphone in Chrome or Edge. |
