@@ -1,6 +1,6 @@
 # The harness: plan
 
-The CipherCover Agent grows from "decide the claim you're given" into "work the queue". A **queue agent** plans the run as a to-do list, hands each claim to a fresh **claim agent** (a subagent), and ends with a summary for the handlers. The claim agent looks up the sections of the wording and the claims manual it needs instead of being handed the whole wording. Problems are put right automatically: provider errors are retried, failed claims go back in the queue and a claim that fails twice is left for a handler. The production points in `docs/HARNESS.md` (8 to 15) add budgets, leases, writes scoped to one claim, checks on each decision, an audit trail and a Stop button.
+The Under Cover Agent grows from "decide the claim you're given" into "work the queue". A **queue agent** plans the run as a to-do list, hands each claim to a fresh **claim agent** (a subagent), and ends with a summary for the handlers. The claim agent looks up the sections of the wording and the claims manual it needs instead of being handed the whole wording. Problems are put right automatically: provider errors are retried, failed claims go back in the queue and a claim that fails twice is left for a handler. The production points in `docs/HARNESS.md` (8 to 15) add budgets, leases, writes scoped to one claim, checks on each decision, an audit trail and a Stop button.
 
 The plan starts from the pilot as `docs/STATUS.md` describes it. `docs/PLAN.md` is finished and stays as it is.
 

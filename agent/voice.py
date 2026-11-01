@@ -37,7 +37,10 @@ def tools(handler_id: str) -> list[BaseTool]:
 
     @tool
     def find_claims(text: str) -> Any:
-        """Find claims by a spoken or typed claim number or a customer's surname."""
+        """Find claims by a spoken or typed claim number or a customer's surname.
+
+        Pass the handler's words unchanged, such as "ten oh two" or "1002".
+        """
         return {"claims": call("GET", "/api/claims/search", params={"text": text})}
 
     @tool
