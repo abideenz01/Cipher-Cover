@@ -13,11 +13,9 @@ const CONSENT_KEY = "voice-consent";
 
 export function useVoice({
   provider,
-  handlerId,
   onAction,
 }: {
   provider: VoiceProvider | null;
-  handlerId: string;
   onAction: (action: UiAction) => void;
 }) {
   const [status, setStatus] = useState<VoiceStatus>("ready");
@@ -40,7 +38,7 @@ export function useVoice({
       say("you", trimmed);
       setStatus("thinking");
       try {
-        const result = await api.voiceTurn(session, handlerId, trimmed);
+        const result = await api.voiceTurn(session, trimmed);
         say("assistant", result.reply);
         onAction(result.ui_action);
         setStatus("speaking");
@@ -55,7 +53,7 @@ export function useVoice({
         setStatus("ready");
       }
     },
-    [handlerId, onAction, provider, say, session],
+    [onAction, provider, say, session],
   );
 
   const start = useCallback(() => {

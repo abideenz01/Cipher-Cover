@@ -1,0 +1,184 @@
+[
+  {
+    "policy_id": "POL-5001",
+    "customer_id": "CUS-5001",
+    "plan": "premium",
+    "add_ons": [],
+    "purchased_on": "2026-03-01",
+    "sold_through": "Acme Travel Cover website",
+    "trip": {
+      "destination": "Lisbon, Portugal",
+      "departs_on": "2026-07-02",
+      "returns_on": "2026-07-09",
+      "trip_cost": 1800.0
+    },
+    "travelers": [
+      "Ines Calder"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-5002",
+    "customer_id": "CUS-5002",
+    "plan": "premium",
+    "add_ons": [],
+    "purchased_on": "2026-03-02",
+    "sold_through": "Acme Travel Cover website",
+    "trip": {
+      "destination": "Barcelona, Spain",
+      "departs_on": "2026-06-12",
+      "returns_on": "2026-06-19",
+      "trip_cost": 1500.0
+    },
+    "travelers": [
+      "Rohan Mehta"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-5003",
+    "customer_id": "CUS-5003",
+    "plan": "first",
+    "add_ons": [
+      "electronics_plus"
+    ],
+    "purchased_on": "2026-03-03",
+    "sold_through": "Acme Travel Cover website",
+    "trip": {
+      "destination": "Kyoto, Japan",
+      "departs_on": "2026-08-01",
+      "returns_on": "2026-08-15",
+      "trip_cost": 6200.0
+    },
+    "travelers": [
+      "Clara Novak"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-5004",
+    "customer_id": "CUS-5004",
+    "plan": "economy",
+    "add_ons": [],
+    "purchased_on": "2026-03-04",
+    "sold_through": "Acme Travel Cover website",
+    "trip": {
+      "destination": "Crete, Greece",
+      "departs_on": "2026-05-20",
+      "returns_on": "2026-05-30",
+      "trip_cost": 1200.0
+    },
+    "travelers": [
+      "Theo Lindqvist"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-5005",
+    "customer_id": "CUS-5005",
+    "plan": "premium",
+    "add_ons": [],
+    "purchased_on": "2026-03-05",
+    "sold_through": "Acme Travel Cover website",
+    "trip": {
+      "destination": "Marrakesh, Morocco",
+      "departs_on": "2026-09-10",
+      "returns_on": "2026-09-17",
+      "trip_cost": 2400.0
+    },
+    "travelers": [
+      "Amara Eze"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-5006",
+    "customer_id": "CUS-5006",
+    "plan": "economy",
+    "add_ons": [],
+    "purchased_on": "2026-03-06",
+    "sold_through": "Acme Travel Cover website",
+    "trip": {
+      "destination": "Prague, Czechia",
+      "departs_on": "2026-04-04",
+      "returns_on": "2026-04-08",
+      "trip_cost": 600.0
+    },
+    "travelers": [
+      "Jonah Whitlock"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-5007",
+    "customer_id": "CUS-5007",
+    "plan": "premium",
+    "add_ons": [],
+    "purchased_on": "2026-03-07",
+    "sold_through": "Acme Travel Cover website",
+    "trip": {
+      "destination": "Dubrovnik, Croatia",
+      "departs_on": "2026-07-20",
+      "returns_on": "2026-07-27",
+      "trip_cost": 1700.0
+    },
+    "travelers": [
+      "Sofia Marchetti"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-5008",
+    "customer_id": "CUS-5008",
+    "plan": "first",
+    "add_ons": [],
+    "purchased_on": "2026-03-08",
+    "sold_through": "Acme Travel Cover website",
+    "trip": {
+      "destination": "Vancouver, Canada",
+      "departs_on": "2026-10-01",
+      "returns_on": "2026-10-21",
+      "trip_cost": 7800.0
+    },
+    "travelers": [
+      "Kai Thornbury"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-5009",
+    "customer_id": "CUS-5001",
+    "plan": "economy",
+    "add_ons": [],
+    "purchased_on": "2026-03-09",
+    "sold_through": "Acme Travel Cover website",
+    "trip": {
+      "destination": "Nice, France",
+      "departs_on": "2026-09-25",
+      "returns_on": "2026-09-29",
+      "trip_cost": 900.0
+    },
+    "travelers": [
+      "Ines Calder"
+    ],
+    "status": "active"
+  },
+  {
+    "policy_id": "POL-5010",
+    "customer_id": "CUS-5006",
+    "plan": "economy",
+    "add_ons": [],
+    "purchased_on": "2026-03-01",
+    "sold_through": "Acme Travel Cover website",
+    "trip": {
+      "destination": "Galway, Ireland",
+      "departs_on": "2026-08-14",
+      "returns_on": "2026-08-18",
+      "trip_cost": 700.0
+    },
+    "travelers": [
+      "Jonah Whitlock"
+    ],
+    "status": "active"
+  }
+]

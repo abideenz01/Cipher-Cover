@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from agent import main
-from backend import clock, db, runner, store
+from backend import auth, clock, db, runner, store
 
 router = APIRouter(prefix="/api")
 
@@ -20,17 +20,19 @@ def spawn(work: Callable[[], None]) -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
-def lease(conn: sqlite3.Connection, claim_id: str, queue_run_id: str) -> str:
+def lease(
+    conn: sqlite3.Connection, claim_id: str, queue_run_id: str, tenant_id: str
+) -> str:
     """Move a waiting claim to in progress under a new claim run, or raise 409.
 
     The claim is taken in one conditional update, so two callers can never both
     take it.
     """
-    store.claim_row(conn, claim_id)
+    store.claim_row(conn, claim_id, tenant_id)
     taken = conn.execute(
         "UPDATE claims SET state = 'in_progress', state_since = ?"
-        " WHERE claim_id = ? AND state = 'waiting'",
-        (clock.stamp(), claim_id),
+        " WHERE claim_id = ? AND tenant_id = ? AND state = 'waiting'",
+        (clock.stamp(), claim_id, tenant_id),
     ).rowcount
     if not taken:
         raise HTTPException(409, f"Claim {claim_id} is not waiting.")
@@ -40,17 +42,44 @@ def lease(conn: sqlite3.Connection, claim_id: str, queue_run_id: str) -> str:
     run_id = uuid.uuid4().hex
     conn.execute(
         "INSERT INTO runs (run_id, claim_id, status, error, started_at, ended_at,"
-        " queue_run_id, attempt, failure, tokens, model_calls, model)"
-        " VALUES (?, ?, 'running', '', ?, '', ?, ?, '', 0, 0, '')",
-        (run_id, claim_id, clock.stamp(), queue_run_id, attempt + 1),
+        " queue_run_id, attempt, failure, tokens, model_calls, model, tenant_id)"
+        " VALUES (?, ?, 'running', '', ?, '', ?, ?, '', 0, 0, '', ?)",
+        (run_id, claim_id, clock.stamp(), queue_run_id, attempt + 1, tenant_id),
     )
     return run_id
 
 
-def begin(claim_id: str) -> str:
+def begin(claim_id: str, tenant_id: str) -> str:
     """Create a claim run on its own and move its claim to in progress."""
     with db.connect() as conn:
-        return lease(conn, claim_id, "")
+        return lease(conn, claim_id, "", tenant_id)
+
+
+def claim_token(conn: sqlite3.Connection, run_id: str) -> str:
+    """Issue the token a claim agent works its run with, bound to its claim."""
+    run = conn.execute(
+        "SELECT claim_id, tenant_id FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    company = db.reference(conn, "company", run["tenant_id"])
+    seconds = company["agent_run_timeout_seconds"] + 60
+    return auth.issue(
+        conn,
+        run["tenant_id"],
+        "claim",
+        seconds,
+        run_id=run_id,
+        claim_id=run["claim_id"],
+    )
+
+
+def tenant_of(conn: sqlite3.Connection, run_id: str) -> str:
+    """Return the tenant of a claim run or a queue run."""
+    row = conn.execute(
+        "SELECT tenant_id FROM runs WHERE run_id = ?"
+        " UNION ALL SELECT tenant_id FROM queue_runs WHERE run_id = ?",
+        (run_id, run_id),
+    ).fetchone()
+    return row["tenant_id"] if row else ""
 
 
 def record(run_id: str, step: dict[str, Any]) -> None:
@@ -71,14 +100,15 @@ def record(run_id: str, step: dict[str, Any]) -> None:
             )
             return
         conn.execute(
-            "INSERT INTO run_events (run_id, kind, name, detail, created_at)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO run_events (run_id, kind, name, detail, created_at,"
+            " tenant_id) VALUES (?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 step["kind"],
                 step["name"],
                 json.dumps(step["detail"]),
                 clock.stamp(),
+                tenant_of(conn, run_id),
             ),
         )
 
@@ -86,7 +116,9 @@ def record(run_id: str, step: dict[str, Any]) -> None:
 def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> None:
     """End a run. A run that left its claim undecided has failed."""
     with db.connect() as conn:
-        undecided = store.claim_row(conn, claim_id)["state"] == "in_progress"
+        auth.revoke(conn, run_id)
+        tenant_id = tenant_of(conn, run_id)
+        undecided = store.claim_row(conn, claim_id, tenant_id)["state"] == "in_progress"
         if not error and undecided:
             error = "The agent finished without recording a decision."
         if undecided:
@@ -111,35 +143,39 @@ def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> No
 
 def work(run_id: str, claim_id: str) -> None:
     """Run the agent and record how the run ended."""
+    with db.connect() as conn:
+        token = claim_token(conn, run_id)
     try:
-        runner.execute(claim_id, run_id, lambda step: record(run_id, step))
+        runner.execute(claim_id, run_id, lambda step: record(run_id, step), token)
     except Exception as error:  # noqa: BLE001 - a failed run must free its claim
         finish(run_id, claim_id, main.describe(error), main.failure(error))
         return
     finish(run_id, claim_id, "")
 
 
-def run_view(conn: Any, run_id: str) -> dict[str, Any]:
-    """Return one run, or raise 404."""
-    row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+def run_view(conn: Any, run_id: str, tenant_id: str) -> dict[str, Any]:
+    """Return one of the tenant's runs, or raise 404."""
+    row = conn.execute(
+        "SELECT * FROM runs WHERE run_id = ? AND tenant_id = ?", (run_id, tenant_id)
+    ).fetchone()
     if row is None:
         raise HTTPException(404, f"There is no run {run_id}.")
     return store.run_view(conn, row)
 
 
 @router.post("/claims/{claim_id}/runs", operation_id="start_run")
-def start_run(claim_id: str) -> dict[str, Any]:
+def start_run(claim_id: str, who: auth.Who) -> dict[str, Any]:
     """Start the agent on one claim."""
-    run_id = begin(claim_id)
+    run_id = begin(claim_id, who.tenant_id)
     spawn(lambda: work(run_id, claim_id))
     return {"run_id": run_id, "claim_id": claim_id, "status": "running"}
 
 
 @router.get("/runs/{run_id}", operation_id="get_run")
-def get_run(run_id: str) -> dict[str, Any]:
+def get_run(run_id: str, who: auth.Who) -> dict[str, Any]:
     """Return a run's status and outcome."""
     with db.connect() as conn:
-        return run_view(conn, run_id)
+        return run_view(conn, run_id, who.tenant_id)
 
 
 def events(run_id: str) -> list[dict[str, Any]]:
@@ -160,8 +196,8 @@ def events(run_id: str) -> list[dict[str, Any]]:
 
 
 @router.get("/runs/{run_id}/events", operation_id="list_run_events")
-def list_run_events(run_id: str) -> list[dict[str, Any]]:
+def list_run_events(run_id: str, who: auth.Who) -> list[dict[str, Any]]:
     """Return the run's trace so far."""
     with db.connect() as conn:
-        run_view(conn, run_id)
+        run_view(conn, run_id, who.tenant_id)
     return events(run_id)

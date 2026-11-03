@@ -73,9 +73,15 @@ def path() -> str:
 
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
-    """Open the database, commit on success and close."""
+    """Open the database, commit on success and close.
+
+    WAL lets the dashboard read while an agent thread writes. Keep each
+    connection short: open it for one step, never across a model call.
+    """
     conn = sqlite3.connect(path(), timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     try:
         yield conn
         conn.commit()
@@ -83,9 +89,18 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def reference(conn: sqlite3.Connection, name: str) -> Any:
-    """Return a reference document such as the company settings or the plans."""
-    row = conn.execute("SELECT data FROM reference WHERE name = ?", (name,)).fetchone()
+def reference(conn: sqlite3.Connection, name: str, tenant_id: str) -> Any:
+    """Return a tenant's reference document, such as its company settings.
+
+    A tenant's own copy wins; without one it gets the shared document.
+    """
+    row = (
+        conn.execute(
+            "SELECT data FROM tenant_reference WHERE tenant_id = ? AND name = ?",
+            (tenant_id, name),
+        ).fetchone()
+        or conn.execute("SELECT data FROM reference WHERE name = ?", (name,)).fetchone()
+    )
     return json.loads(row["data"])
 
 

@@ -30,6 +30,10 @@ Every decision carries a few tags. `difficulty` is `routine`, `hard` or `manual`
 A decision is scored on two things: the decision itself and the payout. A valid claim that pays more than $1,000 is still an approve. The payment waits for a handler's sign-off, and `over_approval_limit` marks those claims.
 - `evals/voice_scenarios.json`: 19 spoken requests with the tool calls, replies and screen actions expected. The voice agent must never see it.
 
+## A second insurer
+
+- `tenants/acme/`: Acme Travel Cover, a second fictional insurer, seeded as tenant `T-ACME` so that tenant isolation can be shown and tested. It has its own `tenant.json` and `company.json` (a $750.00 sign-off limit and an 8 hour SLA), plus 8 customers, 10 policies, 3 handlers and 10 claims (CLM-5001 to CLM-5010). It shares the plans and the policy wording. Its claims have no labelled decisions and are not part of any evaluation set.
+
 ## The security claims
 
 - `security/`: CLM-1901, CLM-1902 and CLM-1903. Each carries an instruction aimed at the AI inside the customer's text or a supporting document. They have their own policies, customers and handler decisions, apart from the queue and the evaluation sets.

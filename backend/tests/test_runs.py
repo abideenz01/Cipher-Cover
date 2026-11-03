@@ -1,13 +1,12 @@
 from contextlib import nullcontext
 
 import pytest
-from fastapi.testclient import TestClient
 
 from agent import main
 from backend import runner, runs
-from backend.main import app
+from backend.tests import sessions
 
-client = TestClient(app)
+client = sessions.client()
 
 
 @pytest.fixture(autouse=True)
@@ -55,7 +54,7 @@ def test_one_run_at_a_time(monkeypatch):
 
 
 def test_a_failed_run_frees_the_claim(monkeypatch):
-    def broken(claim_id, run_id, on_step):
+    def broken(claim_id, run_id, on_step, token):
         raise RuntimeError("The model is unavailable.")
 
     monkeypatch.setattr(runner, "execute", broken)
@@ -66,7 +65,7 @@ def test_a_failed_run_frees_the_claim(monkeypatch):
 
 
 def test_a_run_without_a_decision_fails(monkeypatch):
-    monkeypatch.setattr(runner, "execute", lambda claim_id, run_id, on_step: None)
+    monkeypatch.setattr(runner, "execute", lambda claim_id, run_id, on_step, t: None)
     run, _ = finished("CLM-1001")
     assert run["status"] == "failed"
     assert client.get("/api/claims/CLM-1001").json()["state"] == "waiting"

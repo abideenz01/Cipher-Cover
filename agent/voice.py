@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel, SecretStr
 
-from agent.main import DEFAULT_MODEL, OPENROUTER_BASE_URL, call
+from agent.main import DEFAULT_MODEL, OPENROUTER_BASE_URL, acting, call
 
 SESSIONS = InMemorySaver()
 
@@ -32,8 +32,8 @@ class VoiceReply(BaseModel):
     ui_action: UiAction
 
 
-def tools(handler_id: str) -> list[BaseTool]:
-    """Return the nine tools, acting for one handler."""
+def tools() -> list[BaseTool]:
+    """Return the nine tools. The token decides whom they act for."""
 
     @tool
     def find_claims(text: str) -> Any:
@@ -81,8 +81,7 @@ def tools(handler_id: str) -> list[BaseTool]:
     @tool
     def request_signoff(claim_id: str) -> Any:
         """Highlight a payout on the Sign-off screen for the handler to confirm."""
-        body = {"handler_id": handler_id}
-        return call("POST", f"/api/claims/{claim_id}/signoff-request", body)
+        return call("POST", f"/api/claims/{claim_id}/signoff-request")
 
     return [
         find_claims,
@@ -109,12 +108,25 @@ def model() -> ChatOpenAI:
 
 
 def run_turn(
-    session_id: str, handler_id: str, text: str, llm: BaseChatModel | None = None
+    session_id: str,
+    handler_id: str,
+    text: str,
+    llm: BaseChatModel | None = None,
+    *,
+    token: str = "",
 ) -> dict[str, Any]:
-    """Answer one spoken or typed request from a handler."""
+    """Answer one spoken or typed request from a handler, under their voice token."""
+    with acting(token):
+        return answer(session_id, handler_id, text, llm)
+
+
+def answer(
+    session_id: str, handler_id: str, text: str, llm: BaseChatModel | None
+) -> dict[str, Any]:
+    """Run the voice agent on one request and return its reply."""
     agent = create_agent(
         llm or model(),
-        tools=tools(handler_id),
+        tools=tools(),
         system_prompt=call("GET", "/api/voice/instructions")["text"],
         response_format=ToolStrategy(VoiceReply),
         checkpointer=SESSIONS,

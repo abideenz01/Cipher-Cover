@@ -1,11 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
+import { DANA, LEON, signIn, signOut } from "./session";
 
-async function open(page: Page) {
+async function open(page: Page, email = DANA) {
   await page.clock.install();
   await page.addInitScript(() => {
     localStorage.setItem("voice-consent", "yes");
   });
-  await page.goto("/");
+  await signIn(page, email);
   await expect(page.getByRole("button", { name: /^CLM-/ })).toHaveCount(35);
 }
 
@@ -44,7 +45,7 @@ test("asking what is waiting reads back the sign-off queue", async ({
 });
 
 test("a sign-off by voice is only confirmed by a click", async ({ page }) => {
-  await open(page);
+  await open(page, LEON);
   await page
     .getByRole("button", { name: /CLM-1405/ })
     .first()
@@ -54,13 +55,13 @@ test("a sign-off by voice is only confirmed by a click", async ({ page }) => {
   await expect(page.locator(".payout")).toHaveText("$1,500.00");
   await page.keyboard.press("Escape");
 
-  const acting = page.getByRole("combobox", { name: "Acting handler" });
-  await acting.selectOption("HND-04");
+  await expect(page.getByText("Speaking as HND-04 Leon Abara")).toBeVisible();
   await type(page, "sign off fourteen oh five");
   await expect(captions(page)).toContainText("not allowed to sign off");
   await expect(page.locator(".signoff.highlight")).toHaveCount(0);
 
-  await acting.selectOption("HND-01");
+  await signOut(page);
+  await signIn(page);
   await type(page, "sign off fourteen oh five");
   const row = page.getByRole("listitem", { name: "Sign-off CLM-1405" });
   await expect(row).toHaveClass(/highlight/);
@@ -85,7 +86,7 @@ test("with voice off there is no mic", async ({ page }) => {
   await page.route("**/api/voice/config", (route) =>
     route.fulfill({ json: { enabled: false, provider: "browser" } }),
   );
-  await page.goto("/");
+  await signIn(page);
   await expect(page.getByRole("button", { name: /^CLM-/ })).toHaveCount(35);
   await expect(page.getByRole("button", { name: /Hold to talk/ })).toHaveCount(
     0,

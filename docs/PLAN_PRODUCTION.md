@@ -118,7 +118,7 @@ Every migration is additive (new tables, or nullable or defaulted columns), so e
   - [x] Running the migrations twice changes nothing.
   - [x] Playwright 14 of 14, after fixing `.env` taking precedence over the e2e settings (`agent/main.py:load_settings`).
 
-### Phase 1: multi-tenant security
+### Phase 1: multi-tenant security. **Done 2026-11-03**
 - `backend/migrations/0002_tenancy.py`, `0003_auth.py`.
 - `backend/auth.py` (new): password hashing, sessions, `current_principal`, `require(permission)`, CSRF check, login rate limit, and the login, logout and me routes (`operation_id`s `login`, `logout`, `get_me`).
 - `backend/permissions.py` (new): the role → permission matrix. Roles: tenant_admin, claims_handler, senior_handler, siu_investigator, auditor, plus the internal `agent_queue` and `agent_claim` roles. Auditors are read-only, including traces. Only senior_handler may sign off. siu_investigator gets SIU routes and full claim documents. tenant_admin can manage users and config but **cannot sign off or pay**.
@@ -135,6 +135,20 @@ Every migration is additive (new tables, or nullable or defaulted columns), so e
 - **Tests (`backend/tests/test_tenancy.py`, `test_auth.py`):** a parametrized test over **every** operation in `app.openapi()` checks that it returns 401 with no session, the permission rules for each role, and that a T-ACME user gets 404 for every T-UNDERCOVER claim, policy, customer, run, queue run, trace and config. A claim-agent token cannot touch another claim, another tenant, or a sign-off. A queue token cannot pay. Recovery on startup frees only the right tenant's claims. Session expiry and revocation. Security events written for each denial. An OpenAPI walk asserts that no route lacks an authorization dependency.
 - **Unauthenticated surface:** only `health`, `login` and a `get_public_config` endpoint that is genuinely public (product name, auth method, version; checked by a test to hold no secrets, keys, tenant names, tenant config or feature flags tied to a tenant). **Every voice operation, `voice/config` included, requires authentication.**
 - **Accept:** all existing behavior is kept for a signed-in senior handler. No route is reachable without auth except `health`, `login` and `get_public_config`. The docs state that tenant isolation is application-level for now and that Postgres RLS is a deployment gate. No cross-tenant read or write succeeds in tests. Medical document text does not appear in any agent tool response unless the tenant has opted in. `npm run check` is green.
+- **As built** (where it differs from the list above):
+  - `guard` is set on the whole app (`FastAPI(dependencies=[Depends(auth.guard)])`) and reads the route's `operation_id`, so no route can be added without an entry in `permissions.py`. There is no per-route `require(...)` to forget. Agent kinds are token kinds (`claim`, `queue`, `voice`), not roles.
+  - The second tenant `T-ACME` is seeded from `data/tenants/acme/`: fictional, 10 claims, kept apart from the labelled UnderCover queue.
+  - `/docs` and `/openapi.json` sit outside the routes, so they are off unless `API_DOCS=1`.
+  - Not built in the first pass, then added on 2026-11-03: user and settings management (`backend/accounts.py`, the Admin view), a seeded second tenant (`data/tenants/acme/`), per-tenant company settings and a stored sign-in throttle (migration 0004), and WAL. SIU routes stay in Phase 4. Startup recovery frees every tenant's claims, because a restart ends every tenant's runs.
+  - The claim instructions don't yet say what to do with a withheld medical document. Measure the six medical claims in Phase 5a before changing them.
+  - [x] All existing behavior kept for a signed-in senior handler (every earlier test passes, signed in or with an agent token).
+  - [x] Only `health`, `login` and `get_public_config` answer without sign-in (`test_every_operation_but_three_needs_sign_in`, over every operation in `app.openapi()`).
+  - [x] The docs say isolation is application-level and Postgres RLS is a deployment gate (`docs/ADR_POSTGRES.md`, `SPEC.md`, `ARCHITECTURE.md`, `STATUS.md`).
+  - [x] No cross-tenant read or write succeeds (`test_tenancy.py`: 404 for each claim, policy, customer, run, trace, queue run, brief, sign-off, send-back and sign-off request; lists, search and analytics are per tenant; a T-ACME run's rows all carry T-ACME).
+  - [x] Agent tokens: a claim token reaches only its claim, policy and customer, and ends with its run, on expiry and on restart; a queue token can't pay, decide or touch another queue run; a voice token has only what its person has.
+  - [x] Medical text reaches no agent unless the tenant opts in (`test_medical_documents_never_reach_an_agent_unless_the_tenant_allows_it`).
+  - [x] Sessions: cookie flags, CSRF on writes, idle and absolute expiry, sign-out, disabled users, throttled failures, hashes only (`test_auth.py`).
+  - [x] `npm run check` green: Python 235 passed at 98.3%, TypeScript 38 at 96.5%, Playwright 14 of 14. After closing the gaps: Python 262 passed at 99%, TypeScript 42 at 96.3%, Playwright 16 of 16.
 
 ### Phase 5a: eval baseline (offline; the agent never sees keys)
 - `evals/` package (new, **outside** `backend/` so the API can't serve it): `datasets.py` (manifest with sha256, version, provenance and n; normalizes the different schemas), `score.py` (coverage-decision accuracy, payout exact-match in cents against `calculation`, cited-section overlap against `reference`, referral precision and recall. Binary proportions get Wilson CIs. Continuous metrics (payout error in cents, handling time, latency) get median, p90 and a bootstrap CI for the median when n permits, otherwise only n and the range. Every metric reports n.), `run.py` (CLI: `uv run -m evals.run --set queue --tiny`, seeds a temporary DB from the set, runs the agent (stub by default), scores, writes `eval_runs` and `eval_results` to a **separate** eval DB).
@@ -183,6 +197,17 @@ Every migration is additive (new tables, or nullable or defaulted columns), so e
 - **Instruction changes (verification tool, UNVERIFIED wording)** change the fingerprint and may shift decision quality: rerun the 5a baseline before and after.
 - **The medical gate** may lower agent accuracy on 6 medical claims: measure with 5a.
 - **Unused heavy deps** (gradio, boto3, deepagents and others): don't add more, and leave the cleanup as a separate change.
+
+These are standing rules for every phase. At the end of each phase, record how each one was handled in the table below and in `docs/STATUS.md`.
+
+| Risk | How it is handled | State after Phase 1 |
+|---|---|---|
+| Migrating existing databases | Every schema change is a migration in `backend/migrations/`; 0001 checks an existing schema and refuses a mismatch | Handled. 0002 to 0004 migrate a harness database in place (checked on a copy of the local `undercover.db`) |
+| Auth breaks e2e and voice flows | Shared fixtures only: `backend/tests/sessions.py` and `e2e/session.ts` | Handled. No per-test workaround in any spec |
+| SQLite concurrency | WAL and a 30-second busy timeout on every connection (`db.connect`); connections opened per step, never held across a model call; limits recorded in `docs/ADR_POSTGRES.md` | Handled now, ahead of Phase 2 |
+| Instruction changes shift quality | No change to the agent's instructions or tools until the 5a baseline exists; then measure before and after | Held. The instructions and fingerprint are unchanged in Phase 1 |
+| Medical gate lowers accuracy | Measure the six medical claims in 5a with the gate on and off (the tenant setting); only then decide the instruction wording | Open until 5a. The gate is on; admins can switch it per tenant |
+| Unused heavy dependencies | Add none; clean up in a separate change | Held. Phase 1 added no dependency |
 
 ## F. Verification (each phase)
 

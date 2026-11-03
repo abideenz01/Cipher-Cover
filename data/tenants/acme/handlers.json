@@ -1,0 +1,23 @@
+[
+  {
+    "handler_id": "HND-A1",
+    "name": "Ada Okonkwo",
+    "role": "Senior Claims Handler",
+    "email": "ada.okonkwo@acme.example",
+    "can_approve_over_limit": true
+  },
+  {
+    "handler_id": "HND-A2",
+    "name": "Felix Brandt",
+    "role": "Claims Handler, in training",
+    "email": "felix.brandt@acme.example",
+    "can_approve_over_limit": false
+  },
+  {
+    "handler_id": "HND-A3",
+    "name": "Mina Haddad",
+    "role": "Special Investigations Officer",
+    "email": "mina.haddad@acme.example",
+    "can_approve_over_limit": false
+  }
+]

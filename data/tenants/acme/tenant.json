@@ -1,0 +1,8 @@
+{
+  "tenant_id": "T-ACME",
+  "name": "Acme Travel Cover",
+  "timezone": "Europe/London",
+  "config": {
+    "external_model_medical": false
+  }
+}

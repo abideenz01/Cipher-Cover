@@ -1,16 +1,15 @@
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
-from backend.main import app
+from backend.tests import sessions
 from backend.tests.test_decisions import calculate, decide
 from backend.tests.test_read import PERSONAL, keys
 from backend.voice import routes
 from backend.voice.briefs import speak_claim_id, speak_money
 from backend.voice.normalize import claim_id
 
-client = TestClient(app)
+client = sessions.client()
 
 
 @pytest.fixture(autouse=True)
@@ -122,14 +121,14 @@ def test_analytics_brief(waiting):
     assert brief["paid"] == 0
 
 
-def request(handler_id):
+def request(user_id):
     return client.post(
-        "/api/claims/CLM-1011/signoff-request", json={"handler_id": handler_id}
+        "/api/claims/CLM-1011/signoff-request", headers=sessions.headers(user_id)
     )
 
 
 def test_request_signoff_changes_nothing(waiting):
-    response = request("HND-01")
+    response = request("USR-01")
     assert response.status_code == 200
     assert response.json()["ui_action"] == {
         "type": "focus_signoff",
@@ -138,11 +137,11 @@ def test_request_signoff_changes_nothing(waiting):
     claim = client.get("/api/claims/CLM-1011").json()
     assert claim["state"] == "waiting_for_signoff"
     assert claim["paid"] == 0
-    assert request("HND-04").status_code == 403
+    assert request("USR-04").status_code == 403
 
 
 def test_request_signoff_needs_a_waiting_claim():
-    assert request("HND-01").status_code == 409
+    assert request("USR-01").status_code == 409
 
 
 def test_signoffs_are_spoken(waiting):
@@ -156,14 +155,14 @@ def test_rate_limit(monkeypatch):
     monkeypatch.setattr(
         routes,
         "answer",
-        lambda body: {
+        lambda body, handler_id, token: {
             "reply": "Hi.",
             "speech": "Hi.",
             "ui_action": {"type": "none", "claim_id": ""},
             "tools": [],
         },
     )
-    body = {"session_id": "s1", "handler_id": "HND-01", "text": "hello"}
+    body = {"session_id": "s1", "text": "hello"}
     for _ in range(20):
         assert client.post("/api/voice/turn", json=body).status_code == 200
     assert client.post("/api/voice/turn", json=body).status_code == 429
@@ -174,22 +173,22 @@ def test_unbacked_highlight_is_dropped(monkeypatch):
     monkeypatch.setattr(
         routes,
         "answer",
-        lambda body: {
+        lambda body, handler_id, token: {
             "reply": "Done.",
             "speech": "Done.",
             "ui_action": {"type": "focus_signoff", "claim_id": "CLM-1011"},
             "tools": [],
         },
     )
-    body = {"session_id": "s2", "handler_id": "HND-01", "text": "sign off ten eleven"}
+    body = {"session_id": "s2", "text": "sign off ten eleven"}
     result = client.post("/api/voice/turn", json=body).json()
     assert result["ui_action"] == {"type": "none", "claim_id": ""}
 
 
 def test_timeout(monkeypatch):
     monkeypatch.setenv("VOICE_TURN_TIMEOUT_SECONDS", "0.1")
-    monkeypatch.setattr(routes, "answer", lambda body: __import__("time").sleep(1))
-    body = {"session_id": "s3", "handler_id": "HND-01", "text": "hello"}
+    monkeypatch.setattr(routes, "answer", lambda *_: __import__("time").sleep(1))
+    body = {"session_id": "s3", "text": "hello"}
     result = client.post("/api/voice/turn", json=body).json()
     assert result["status"] == "failed"
     assert result["reply"] == routes.FALLBACK

@@ -3,14 +3,13 @@ from contextlib import nullcontext
 import httpx2
 import openai
 import pytest
-from fastapi.testclient import TestClient
 
 from agent import main, queue
 from agent.stub import FaultyModel, QueueScript, ScriptedModel
 from backend import runner, runs
-from backend.main import app
+from backend.tests import sessions
 
-client = TestClient(app)
+client = sessions.client()
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +23,9 @@ def run_with(monkeypatch, cap, llm, claim_llm):
     monkeypatch.setattr(
         runner,
         "execute_queue",
-        lambda run_id, on_step: queue.run_queue(run_id, llm, claim_llm, on_step),
+        lambda run_id, on_step, token: queue.run_queue(
+            run_id, llm, claim_llm, on_step, token=token
+        ),
     )
     run_id = client.post("/api/runs", json={"cap": cap}).json()["run_id"]
     return client.get(f"/api/queue-runs/{run_id}").json()
@@ -74,7 +75,7 @@ def re_claims(prompt):
     return [m.text.split()[-1] for m in prompt[1:2]]
 
 
-def test_the_queue_agent_cannot_decide_or_pay():
+def test_the_queue_agent_cannot_decide_or_pay(monkeypatch):
     names = {t.name for t in queue.tools("x", None, lambda *_: None, 120)}
     assert names == {
         "get_run_status",
@@ -84,6 +85,7 @@ def test_the_queue_agent_cannot_decide_or_pay():
         "finish_run",
     }
     assert not names & {"record_decision", "pay_claim", "calculate_payout"}
+    monkeypatch.setattr(runs, "spawn", lambda work: None)
     run_id = client.post("/api/runs", json={"cap": 1}).json()["run_id"]
     body = {
         "run_id": run_id,
@@ -93,7 +95,12 @@ def test_the_queue_agent_cannot_decide_or_pay():
         "sections": ["wording-5"],
         "model": "stub",
     }
-    assert client.post("/api/claims/CLM-1001/decision", json=body).status_code == 409
+    agent = sessions.queue_agent(run_id)
+    response = client.post("/api/claims/CLM-1001/decision", json=body, headers=agent)
+    assert response.status_code == 403
+    payment = {"run_id": run_id, "amount": 1}
+    response = client.post("/api/claims/CLM-1001/pay", json=payment, headers=agent)
+    assert response.status_code == 403
 
 
 def test_a_claim_that_breaks_does_not_stop_the_run(monkeypatch):

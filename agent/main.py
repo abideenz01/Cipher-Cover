@@ -3,6 +3,8 @@
 import os
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Literal
 
 import httpx
@@ -22,7 +24,18 @@ from langchain_openai import ChatOpenAI
 from langgraph.config import get_config
 from pydantic import BaseModel, SecretStr
 
-load_dotenv(override=True)
+
+def load_settings(path: str | None = None) -> None:
+    """Fill settings from .env without replacing ones the process was given.
+
+    A harness that starts the backend with its own settings, such as the
+    end-to-end tests with VOICE_PROVIDER=stub or a temporary DB_PATH, must not
+    have them replaced by a developer's .env.
+    """
+    load_dotenv(path, override=False)
+
+
+load_settings()
 
 BACKEND_URL = "http://127.0.0.1:8000"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -36,6 +49,23 @@ PROVIDER_ERRORS = (
 )
 
 Step = dict[str, Any]
+
+# The service token the backend issued for the run in hand. Every call to the
+# backend sends it, and the backend allows only what that run may do.
+TOKEN: ContextVar[str] = ContextVar("token", default="")
+
+
+@contextmanager
+def acting(token: str) -> Iterator[None]:
+    """Send this token on every backend call made inside the block."""
+    if not token:
+        yield
+        return
+    reset = TOKEN.set(token)
+    try:
+        yield
+    finally:
+        TOKEN.reset(reset)
 
 
 class ClaimTimeout(Exception):
@@ -62,8 +92,12 @@ def call(
     params: dict[str, str] | None = None,
 ) -> Any:
     """Call the backend. A refusal comes back as an error for the agent to read."""
+    token = TOKEN.get()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     with backend() as client:
-        response = client.request(method, path, json=body, params=params)
+        response = client.request(
+            method, path, json=body, params=params, headers=headers
+        )
     if response.is_server_error:
         response.raise_for_status()
     if response.is_client_error:
@@ -272,7 +306,10 @@ def run(
     on_step: Callable[[Step], None] | None = None,
     seconds: float = 120,
 ) -> str:
-    """Run a fresh claim agent on one claim and return its final reply."""
+    """Run a fresh claim agent on one claim and return its final reply.
+
+    Call it inside acting(token) with the run's token, or the backend refuses.
+    """
     llm = llm or model()
     middleware: list[AgentMiddleware[Any, Any, Any]] = [
         retries(),

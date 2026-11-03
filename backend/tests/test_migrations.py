@@ -3,7 +3,10 @@ import sqlite3
 import pytest
 
 from backend import db, migrations, seed
+from backend.migrations import m0002_tenancy
 from backend.migrations.schema import expected, tables
+
+ALL = [m.VERSION for m in migrations.MIGRATIONS]
 
 
 def legacy(path, script: str = db.SCHEMA) -> None:
@@ -41,15 +44,22 @@ def recorded(path) -> list[int] | None:
 
 def test_a_fresh_database_reaches_the_head_version():
     with db.connect() as conn:
-        assert migrations.applied(conn) == [migrations.head()]
-        assert tables(conn) == expected(db.SCHEMA)
+        assert migrations.applied(conn) == ALL
+        assert ALL[-1] == migrations.head() == 4
+        found = tables(conn)
+    baseline = expected(db.SCHEMA)
+    for table, columns in baseline.items():
+        assert set(columns) <= set(found[table]), table
+    for table in m0002_tenancy.TABLES:
+        assert found[table]["tenant_id"][:2] == ("TEXT", 1), table
+    assert {"tenants", "users", "sessions", "service_tokens"} <= set(found)
 
 
 def test_applying_again_changes_nothing():
     with db.connect() as conn:
         before = conn.execute("SELECT COUNT(*) FROM claims").fetchone()[0]
         assert migrations.apply(conn) == []
-        assert migrations.applied(conn) == [migrations.head()]
+        assert migrations.applied(conn) == ALL
     seed.seed()
     with db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM claims").fetchone()[0] == before
@@ -58,10 +68,14 @@ def test_applying_again_changes_nothing():
 def test_a_complete_harness_database_is_adopted_with_its_data(empty):
     legacy(empty)
     seed.seed()
-    assert recorded(empty) == [1]
+    assert recorded(empty) == ALL
     with db.connect() as conn:
-        rows = conn.execute("SELECT claim_id FROM claims").fetchall()
-    assert [r["claim_id"] for r in rows] == ["CLM-0001"]
+        rows = conn.execute(
+            "SELECT claim_id, tenant_id FROM claims WHERE tenant_id = 'T-UNDERCOVER'"
+        ).fetchall()
+        users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    assert [tuple(r) for r in rows] == [("CLM-0001", "T-UNDERCOVER")]
+    assert users == 11
 
 
 @pytest.mark.parametrize(
@@ -130,6 +144,11 @@ def test_reset_rebuilds_a_refused_database(empty):
     with pytest.raises(migrations.SchemaMismatch):
         seed.seed()
     seed.seed(reset=True)
-    assert recorded(empty) == [1]
+    assert recorded(empty) == ALL
     with db.connect() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM claims").fetchone()[0] == 35
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM claims WHERE tenant_id = 'T-UNDERCOVER'"
+            ).fetchone()[0]
+            == 35
+        )

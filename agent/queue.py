@@ -75,13 +75,14 @@ def tools(
         claim_run = begun["run_id"]
         error, failure = "", ""
         try:
-            main.run(
-                claim_id,
-                claim_run,
-                claim_llm,
-                lambda step: on_step(claim_run, step),
-                seconds,
-            )
+            with main.acting(begun["token"]):
+                main.run(
+                    claim_id,
+                    claim_run,
+                    claim_llm,
+                    lambda step: on_step(claim_run, step),
+                    seconds,
+                )
         except Exception as caught:  # noqa: BLE001 - one bad claim must not stop the run
             error, failure = main.describe(caught), main.failure(caught)
         body = {"error": error, "failure": failure}
@@ -100,8 +101,21 @@ def run_queue(
     llm: BaseChatModel | None = None,
     claim_llm: BaseChatModel | None = None,
     on_step: OnStep | None = None,
+    *,
+    token: str = "",
 ) -> str:
-    """Run the queue agent on a queue run and return its final reply."""
+    """Run the queue agent on a queue run, under its token."""
+    with main.acting(token):
+        return work_queue(run_id, llm, claim_llm, on_step)
+
+
+def work_queue(
+    run_id: str,
+    llm: BaseChatModel | None,
+    claim_llm: BaseChatModel | None,
+    on_step: OnStep | None,
+) -> str:
+    """Run the queue agent and return its final reply."""
     llm = llm or main.model()
     record = on_step or (lambda _run_id, _step: None)
     run = call("GET", f"/api/queue-runs/{run_id}")

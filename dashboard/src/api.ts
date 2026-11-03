@@ -183,37 +183,122 @@ export interface VoiceResult {
   status: "succeeded" | "failed";
 }
 
+export interface Me {
+  user_id: string;
+  name: string;
+  handler_id: string;
+  tenant_id: string;
+  tenant_name: string;
+  roles: string[];
+  can_sign_off: boolean;
+  can_run: boolean;
+}
+
+export interface User {
+  user_id: string;
+  email: string;
+  name: string;
+  handler_id: string;
+  roles: string[];
+  status: "active" | "disabled";
+}
+
+export interface NewUser {
+  email: string;
+  name: string;
+  handler_id: string;
+  roles: string[];
+  password: string;
+}
+
+export interface TenantSettings {
+  name: string;
+  timezone: string;
+  external_model_medical: boolean;
+  payout_approval_limit: number;
+  sign_off_sla_hours: number;
+}
+
+export const ROLES = [
+  "claims_handler",
+  "senior_handler",
+  "siu_investigator",
+  "auditor",
+  "tenant_admin",
+] as const;
+
+/** Thrown when the session has ended, so the dashboard can show sign-in. */
+export class SignedOut extends Error {}
+
+let onSignedOut: () => void = () => undefined;
+
+/** Call this when any request finds the session has ended. */
+export function whenSignedOut(callback: () => void) {
+  onSignedOut = callback;
+}
+
+/** The CSRF token the backend set at sign-in, sent on every write. */
+export function csrfToken(): string {
+  const found = document.cookie
+    .split("; ")
+    .find((part) => part.startsWith("cc_csrf="));
+  return found ? decodeURIComponent(found.slice("cc_csrf=".length)) : "";
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  const response = await fetch(path, { credentials: "same-origin", ...init });
   const body = (await response.json()) as unknown;
   if (!response.ok) {
     const detail = (body as { detail?: unknown }).detail;
-    throw new Error(typeof detail === "string" ? detail : response.statusText);
+    const message = typeof detail === "string" ? detail : response.statusText;
+    if (response.status === 401 && !path.startsWith("/api/auth/")) {
+      onSignedOut();
+      throw new SignedOut(message);
+    }
+    throw new Error(message);
   }
   return body as T;
 }
 
 function post<T>(path: string, body: unknown = {}): Promise<T> {
+  return write<T>("POST", path, body);
+}
+
+function write<T>(method: string, path: string, body: unknown): Promise<T> {
   return request<T>(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken(),
+    },
     body: JSON.stringify(body),
   });
 }
 
 export const api = {
+  login: (email: string, password: string) =>
+    post<Me>("/api/auth/login", { email, password }),
+  logout: () => post("/api/auth/logout"),
+  me: () => request<Me>("/api/auth/me"),
+  listUsers: () => request<User[]>("/api/users"),
+  createUser: (user: NewUser) => post<User>("/api/users", user),
+  setUserRoles: (userId: string, roles: string[]) =>
+    write<User>("PUT", `/api/users/${userId}/roles`, { roles }),
+  disableUser: (userId: string) => post<User>(`/api/users/${userId}/disable`),
+  enableUser: (userId: string) => post<User>(`/api/users/${userId}/enable`),
+  getTenantSettings: () => request<TenantSettings>("/api/tenant/settings"),
+  setMedical: (allowed: boolean) =>
+    write<TenantSettings>("PUT", "/api/tenant/settings", {
+      external_model_medical: allowed,
+    }),
   listClaims: () => request<ClaimSummary[]>("/api/claims"),
   getClaim: (claimId: string) => request<Claim>(`/api/claims/${claimId}`),
   getPolicy: (policyId: string) => request<Policy>(`/api/policies/${policyId}`),
   listHandlers: () => request<Handler[]>("/api/handlers"),
   listSignoffs: () => request<SignOffItem[]>("/api/signoffs"),
-  signOff: (claimId: string, handlerId: string) =>
-    post(`/api/claims/${claimId}/sign-off`, { handler_id: handlerId }),
-  sendBack: (claimId: string, handlerId: string, reason: string) =>
-    post(`/api/claims/${claimId}/send-back`, {
-      handler_id: handlerId,
-      reason,
-    }),
+  signOff: (claimId: string) => post(`/api/claims/${claimId}/sign-off`),
+  sendBack: (claimId: string, reason: string) =>
+    post(`/api/claims/${claimId}/send-back`, { reason }),
   startRun: (claimId: string) => post<Run>(`/api/claims/${claimId}/runs`),
   startQueueRun: (cap: number) => post<QueueRun>("/api/runs", { cap }),
   stopQueueRun: (runId: string) =>
@@ -224,10 +309,6 @@ export const api = {
     request<TraceEvent[]>(`/api/runs/${runId}/events`),
   getInstructions: () => request<AgentInstructions>("/api/instructions"),
   getVoiceConfig: () => request<VoiceConfig>("/api/voice/config"),
-  voiceTurn: (sessionId: string, handlerId: string, text: string) =>
-    post<VoiceResult>("/api/voice/turn", {
-      session_id: sessionId,
-      handler_id: handlerId,
-      text,
-    }),
+  voiceTurn: (sessionId: string, text: string) =>
+    post<VoiceResult>("/api/voice/turn", { session_id: sessionId, text }),
 };

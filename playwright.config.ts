@@ -20,6 +20,8 @@ export default defineConfig({
         AGENT_STUB: "1",
         VOICE_ENABLED: "1",
         VOICE_PROVIDER: "stub",
+        DEMO_PASSWORD: "e2e-demo-password",
+        COOKIE_SECURE: "0",
       },
     },
     {
