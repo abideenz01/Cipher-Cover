@@ -150,11 +150,16 @@ Every migration is additive (new tables, or nullable or defaulted columns), so e
   - [x] Sessions: cookie flags, CSRF on writes, idle and absolute expiry, sign-out, disabled users, throttled failures, hashes only (`test_auth.py`).
   - [x] `npm run check` green: Python 235 passed at 98.3%, TypeScript 38 at 96.5%, Playwright 14 of 14. After closing the gaps: Python 262 passed at 99%, TypeScript 42 at 96.3%, Playwright 16 of 16.
 
-### Phase 5a: eval baseline (offline; the agent never sees keys)
+### Phase 5a: eval baseline (offline; the agent never sees keys). **Done 2026-11-03 (scripted model)**
 - `evals/` package (new, **outside** `backend/` so the API can't serve it): `datasets.py` (manifest with sha256, version, provenance and n; normalizes the different schemas), `score.py` (coverage-decision accuracy, payout exact-match in cents against `calculation`, cited-section overlap against `reference`, referral precision and recall. Binary proportions get Wilson CIs. Continuous metrics (payout error in cents, handling time, latency) get median, p90 and a bootstrap CI for the median when n permits, otherwise only n and the range. Every metric reports n.), `run.py` (CLI: `uv run -m evals.run --set queue --tiny`, seeds a temporary DB from the set, runs the agent (stub by default), scores, writes `eval_runs` and `eval_results` to a **separate** eval DB).
 - `data/evals/MANIFEST.json` (new): every set labelled `synthetic` with `labeller: single handler`.
 - `evals/tests/` and an isolation test that `backend` never imports `evals`.
 - **Accept:** a stub run scores deterministically (a fixed expected score is asserted). Reports print n and CI and mark any slice under 30 as "insufficient sample". Tests show that no answer-key text reaches an agent prompt.
+- **As built:** `evals/datasets.py`, `stats.py`, `score.py`, `run.py`, `store.py` and `compare.py`, with tests in `evals/tests/`. The manifest is at `data/evals/MANIFEST.json`. Each run seeds a temporary backend from a staged folder holding no labels, and works each claim through the API under a claim token, as in production. The eval tables are in a separate `evals.db`, not migration 0008, so no score sits in the backend database. `--medical on|off` lets the gate be measured. The follow-up decisions and voice scenarios are not evaluated yet. `docs/EVALUATION.md` has the method and the baseline.
+  - [x] The stub run scores the same every time, asserted in `test_the_scripted_model_scores_the_same_every_time`.
+  - [x] Reports give n and a Wilson CI for each proportion, median, p90, range and a bootstrap CI for continuous measures, and mark n under 30.
+  - [x] No answer-key text reaches a prompt (`test_no_answer_key_reaches_the_agent`), the staged data holds no labels, and backend and agent never import `evals`.
+  - [ ] A real-model baseline, with medical documents off and on. This costs money, so it waits for the owner to run it.
 
 ### Phase 2: SLA, appeals, complaints
 - `backend/sla.py` (new): pure functions `business_due(start, hours, calendar, holidays, tz)`, `elapsed_business(...)` (with `zoneinfo`; `tzdata` may be needed on Windows, already a transitive dependency of pandas), and clock start, pause and stop on state changes, called from `store.set_state`.
@@ -205,8 +210,8 @@ These are standing rules for every phase. At the end of each phase, record how e
 | Migrating existing databases | Every schema change is a migration in `backend/migrations/`; 0001 checks an existing schema and refuses a mismatch | Handled. 0002 to 0004 migrate a harness database in place (checked on a copy of the local `undercover.db`) |
 | Auth breaks e2e and voice flows | Shared fixtures only: `backend/tests/sessions.py` and `e2e/session.ts` | Handled. No per-test workaround in any spec |
 | SQLite concurrency | WAL and a 30-second busy timeout on every connection (`db.connect`); connections opened per step, never held across a model call; limits recorded in `docs/ADR_POSTGRES.md` | Handled now, ahead of Phase 2 |
-| Instruction changes shift quality | No change to the agent's instructions or tools until the 5a baseline exists; then measure before and after | Held. The instructions and fingerprint are unchanged in Phase 1 |
-| Medical gate lowers accuracy | Measure the six medical claims in 5a with the gate on and off (the tenant setting); only then decide the instruction wording | Open until 5a. The gate is on; admins can switch it per tenant |
+| Instruction changes shift quality | No change to the agent's instructions or tools until the 5a baseline exists; then measure before and after | Tooling ready (`evals.run`, `evals.compare`). Fingerprint `1c8b2cef2c28` unchanged. Needs the real-model baseline before any change |
+| Medical gate lowers accuracy | Measure the six medical claims in 5a with the gate on and off (the tenant setting); only then decide the instruction wording | Tooling ready (`--medical on|off`, the medical slice). Open until a real-model run |
 | Unused heavy dependencies | Add none; clean up in a separate change | Held. Phase 1 added no dependency |
 
 ## F. Verification (each phase)

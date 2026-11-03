@@ -207,6 +207,8 @@ def seed(reset: bool = False) -> None:
                 (name, json.dumps(load(f"{name}.json"))),
             )
         for tenant_id, folder, staff in TENANTS:
+            if folder and not (data_dir() / folder).is_dir():
+                continue
             add_tenant(conn, tenant_id, folder)
             seed_records(conn, tenant_id, folder)
             seed_users(conn, tenant_id, folder, staff)

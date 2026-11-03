@@ -238,6 +238,8 @@ curl -X POST http://127.0.0.1:8000/api/runs -H "Authorization: Bearer $TOKEN"   
 | `npm run format` | Format Python and TypeScript |
 | `npm run e2e` | Playwright end-to-end tests only |
 | `uv run -m backend.seed --reset` | Rebuild the database from `data/` |
+| `uv run -m evals.run --set queue` | Score the agent on an evaluation set (`--model real` costs money; see [docs/EVALUATION.md](docs/EVALUATION.md)) |
+| `uv run -m evals.compare A B` | Compare two evaluation runs |
 
 ## Configuration
 

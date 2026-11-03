@@ -49,7 +49,7 @@ server = [
 ]
 
 [tool.ruff]
-include = ["backend/**/*.py", "agent/**/*.py"]
+include = ["backend/**/*.py", "agent/**/*.py", "evals/**/*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "SIM", "UP", "PL", "S", "PT", "FAST", "C90", "PLR1702"]
@@ -63,12 +63,12 @@ max-complexity = 10
 "*/tests/*" = ["S101", "PLR2004"]
 
 [tool.pytest.ini_options]
-testpaths = ["backend", "agent"]
+testpaths = ["backend", "agent", "evals"]
 pythonpath = ["."]
 addopts = "--import-mode=importlib --cov --cov-report=term-missing"
 
 [tool.coverage.run]
-source = ["backend", "agent"]
+source = ["backend", "agent", "evals"]
 omit = ["*/tests/*"]
 
 [tool.coverage.report]

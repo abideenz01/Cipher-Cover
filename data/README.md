@@ -25,6 +25,8 @@ The data behind UnderCover Travel Insurance, a fictional insurer. Everything her
 - `evals/held_out_claims.json` and `evals/held_out_decisions.json`: twenty-five more claims with their decisions, for checking that an improvement generalizes.
 - `evals/harder/` and `evals/even_harder/`: two further sets with the same file layout. The even harder set depends on `knowledge.json`.
 
+`evals/MANIFEST.json` records each set's version, n, provenance and file hashes. The evaluation (`evals/` at the repo root) refuses a set that no longer matches it. After changing a set, bump the version and rebuild the manifest (see `docs/EVALUATION.md`).
+
 Every decision carries a few tags. `difficulty` is `routine`, `hard` or `manual`. `tempts` names the wrong answer a model is likely to give. `needs` lists what the claim depends on beyond the wording. `tiny` marks a small subset for quick runs.
 
 A decision is scored on two things: the decision itself and the payout. A valid claim that pays more than $1,000 is still an approve. The payment waits for a handler's sign-off, and `over_approval_limit` marks those claims.
