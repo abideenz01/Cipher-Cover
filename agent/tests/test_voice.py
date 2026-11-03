@@ -1,15 +1,21 @@
 from contextlib import nullcontext
 
 import pytest
-from fastapi.testclient import TestClient
 
 from agent import main, voice
 from agent.voice_stub import ScriptedVoiceModel
-from backend.main import app
+from backend.tests import sessions
 from backend.tests.test_decisions import calculate, decide
 from backend.voice import routes
 
-client = TestClient(app)
+client = sessions.client()
+
+
+def turn(session_id, user_id, text, model):
+    """Run one voice turn with a voice token acting for a user."""
+    handler_id = user_id.replace("USR", "HND")
+    token = sessions.voice_agent(user_id)
+    return voice.run_turn(session_id, handler_id, text, model, token=token)
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +31,7 @@ def over_the_limit():
 
 
 def test_tools():
-    assert [t.name for t in voice.tools("HND-01")] == [
+    assert [t.name for t in voice.tools()] == [
         "find_claims",
         "get_claim_brief",
         "get_decision_brief",
@@ -40,7 +46,7 @@ def test_tools():
 
 def test_turn_reads_the_totals():
     model = ScriptedVoiceModel()
-    result = voice.run_turn("s1", "HND-01", "how are we doing", model)
+    result = turn("s1", "USR-01", "how are we doing", model)
     assert result["tools"] == ["get_analytics_brief"]
     assert result["reply"].startswith("35 waiting")
     assert "dollars" in result["speech"]
@@ -51,7 +57,7 @@ def test_turn_reads_the_totals():
 
 def test_turn_opens_a_claim_without_reading_its_story():
     model = ScriptedVoiceModel()
-    result = voice.run_turn("s2", "HND-01", "open claim ten twenty four", model)
+    result = turn("s2", "USR-01", "open claim ten twenty four", model)
     assert result["tools"] == ["find_claims", "open_claim"]
     assert result["ui_action"] == {"type": "open_claim", "claim_id": "CLM-1024"}
     story = client.get("/api/claims/CLM-1024").json()["story"]
@@ -60,36 +66,34 @@ def test_turn_opens_a_claim_without_reading_its_story():
 
 def test_sign_off_by_voice_is_only_a_request():
     over_the_limit()
-    result = voice.run_turn("s3", "HND-01", "sign off ten eleven", ScriptedVoiceModel())
+    result = turn("s3", "USR-01", "sign off ten eleven", ScriptedVoiceModel())
     assert result["tools"] == ["find_claims", "request_signoff"]
     assert result["ui_action"] == {"type": "focus_signoff", "claim_id": "CLM-1011"}
     assert client.get("/api/claims/CLM-1011").json()["state"] == "waiting_for_signoff"
-    refused = voice.run_turn(
-        "s4", "HND-04", "sign off ten eleven", ScriptedVoiceModel()
-    )
+    refused = turn("s4", "USR-04", "sign off ten eleven", ScriptedVoiceModel())
     assert "not allowed" in refused["reply"]
     assert refused["ui_action"]["type"] == "none"
 
 
 def test_sign_off_queue():
     over_the_limit()
-    result = voice.run_turn(
-        "s5", "HND-01", "what is waiting for my sign off", ScriptedVoiceModel()
+    result = turn(
+        "s5", "USR-01", "what is waiting for my sign off", ScriptedVoiceModel()
     )
     assert result["reply"] == "Waiting for sign-off: CLM-1011."
 
 
 def test_session_keeps_its_history():
     model = ScriptedVoiceModel()
-    voice.run_turn("s6", "HND-01", "how are we doing", model)
-    second = voice.run_turn("s6", "HND-01", "open claim ten oh two", model)
+    turn("s6", "USR-01", "how are we doing", model)
+    second = turn("s6", "USR-01", "open claim ten oh two", model)
     assert second["tools"] == ["find_claims", "open_claim"]
     assert len(model.prompts[-1]) > len(model.prompts[0])
 
 
 def test_turn_through_the_api(monkeypatch):
     monkeypatch.setenv("AGENT_STUB", "1")
-    body = {"session_id": "s7", "handler_id": "HND-01", "text": "open ten oh two"}
+    body = {"session_id": "s7", "text": "open ten oh two"}
     result = client.post("/api/voice/turn", json=body).json()
     assert result["status"] == "succeeded"
     assert result["ui_action"]["claim_id"] == "CLM-1002"
@@ -98,7 +102,12 @@ def test_turn_through_the_api(monkeypatch):
 
 
 def test_other_tools():
-    tools = {t.name: t for t in voice.tools("HND-01")}
+    with main.acting(sessions.voice_agent()):
+        other_tools()
+
+
+def other_tools():
+    tools = {t.name: t for t in voice.tools()}
     assert (
         tools["get_claim_brief"].invoke({"claim_id": "CLM-1002"})["state"] == "waiting"
     )
@@ -122,9 +131,9 @@ def test_voice_model(monkeypatch):
 
 
 def test_unknown_claim_and_empty_queue():
-    missing = voice.run_turn("s8", "HND-01", "open claim nobody", ScriptedVoiceModel())
+    missing = turn("s8", "USR-01", "open claim nobody", ScriptedVoiceModel())
     assert missing["reply"] == "I could not find that claim."
-    empty = voice.run_turn(
-        "s9", "HND-01", "what is waiting for my sign off", ScriptedVoiceModel()
+    empty = turn(
+        "s9", "USR-01", "what is waiting for my sign off", ScriptedVoiceModel()
     )
     assert empty["reply"] == "Waiting for sign-off: nothing."

@@ -4,16 +4,15 @@ from pathlib import Path
 import httpx2
 import openai
 import pytest
-from fastapi.testclient import TestClient
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 
 from agent import main
 from agent.stub import FaultyModel, ScriptedModel
-from backend import runner, runs
-from backend.main import app
+from backend import db, runner, runs
+from backend.tests import sessions
 
-client = TestClient(app)
+client = sessions.client()
 REQUEST = httpx2.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
 
 
@@ -45,22 +44,34 @@ def local_backend(monkeypatch):
     monkeypatch.setattr(runs, "spawn", lambda work: work())
 
 
+def token_for(run_id):
+    """Return a claim agent token for a run, as the backend issues one."""
+    with db.connect() as conn:
+        return runs.claim_token(conn, run_id)
+
+
+def run_claim(claim_id, llm, on_step=None):
+    """Run the claim agent on a new run, with the run's token."""
+    run_id = runs.begin(claim_id, sessions.TENANT)
+    with main.acting(token_for(run_id)):
+        return main.run(claim_id, run_id, llm, on_step)
+
+
 def run_with(monkeypatch, claim_id, llm, seconds=120):
     """Start a named-claim run through the backend with the given model."""
-    monkeypatch.setattr(
-        runner,
-        "execute",
-        lambda claim_id, run_id, on_step: main.run(
-            claim_id, run_id, llm, on_step, seconds
-        ),
-    )
+
+    def execute(claim_id, run_id, on_step, token):
+        with main.acting(token):
+            main.run(claim_id, run_id, llm, on_step, seconds)
+
+    monkeypatch.setattr(runner, "execute", execute)
     run_id = client.post(f"/api/claims/{claim_id}/runs").json()["run_id"]
     return client.get(f"/api/runs/{run_id}").json()
 
 
 def test_run_approves_and_pays():
     steps = []
-    reply = main.run("CLM-1001", runs.begin("CLM-1001"), ScriptedModel(), steps.append)
+    reply = run_claim("CLM-1001", ScriptedModel(), steps.append)
     assert reply == "Approved CLM-1001."
     calls = [s["name"] for s in steps if s["kind"] == "tool_call"]
     assert calls == [
@@ -98,7 +109,7 @@ def test_a_run_records_what_it_read_and_used(monkeypatch):
 
 def test_agent_cannot_pay_over_the_limit():
     steps = []
-    main.run("CLM-1011", runs.begin("CLM-1011"), ScriptedModel(), steps.append)
+    run_claim("CLM-1011", ScriptedModel(), steps.append)
     paid = [s for s in steps if s["kind"] == "tool_result" and s["name"] == "pay_claim"]
     assert "Waiting for a handler's sign-off." in paid[0]["detail"]["result"]
     claim = client.get("/api/claims/CLM-1011").json()
@@ -124,7 +135,7 @@ def test_tools():
 
 def test_system_prompt_is_the_claim_instructions_only():
     model = ScriptedModel()
-    main.run("CLM-1001", runs.begin("CLM-1001"), model)
+    run_claim("CLM-1001", model)
     system = model.prompts[0][0].text
     instructions = client.get("/api/instructions").json()["claim"]
     assert instructions in system
@@ -133,15 +144,22 @@ def test_system_prompt_is_the_claim_instructions_only():
 
 
 def test_refusals_reach_the_agent():
-    result = main.call("POST", "/api/claims/CLM-1001/pay", {"run_id": "", "amount": 5})
+    with main.acting(token_for(runs.begin("CLM-1001", sessions.TENANT))):
+        body = {"run_id": "", "amount": 5}
+        result = main.call("POST", "/api/claims/CLM-1001/pay", body)
     assert result == {"error": "There is no live claim run ."}
+
+
+def test_without_a_token_the_backend_refuses_the_agent(monkeypatch):
+    monkeypatch.setattr(main, "backend", lambda: nullcontext(sessions.anyone()))
+    assert main.call("GET", "/api/claims/CLM-1001") == {"error": "Sign in first."}
 
 
 def test_plain_reply():
     model = StubModel(
         messages=iter([tool_call("get_claim", claim_id="CLM-1002"), AIMessage("Done.")])
     )
-    assert main.run("CLM-1002", runs.begin("CLM-1002"), model) == "Done."
+    assert run_claim("CLM-1002", model) == "Done."
 
 
 def test_provider_errors_are_retried(monkeypatch):
@@ -179,8 +197,7 @@ def test_the_time_limit(monkeypatch):
 def test_a_decision_citing_an_unread_section_is_corrected(monkeypatch):
     steps = []
     model = FaultyModel(cite_unread=True)
-    run_id = runs.begin("CLM-1001")
-    main.run("CLM-1001", run_id, model, steps.append)
+    run_claim("CLM-1001", model, steps.append)
     results = [
         s["detail"]["result"]
         for s in steps
@@ -217,3 +234,15 @@ def test_model_name(monkeypatch):
     monkeypatch.setenv("MODEL_NAME", "openrouter/free")
     assert main.model().model_name == "openrouter/free"
     assert main.model_name() == "openrouter/free"
+
+
+def test_settings_given_to_the_process_beat_the_env_file(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text("VOICE_PROVIDER=browser\nONLY_IN_FILE=from-file\n", encoding="utf-8")
+    monkeypatch.setenv("VOICE_PROVIDER", "stub")
+    # Set then delete, so teardown removes whatever load_settings adds.
+    monkeypatch.setenv("ONLY_IN_FILE", "")
+    monkeypatch.delenv("ONLY_IN_FILE")
+    main.load_settings(str(env))
+    assert main.os.environ["VOICE_PROVIDER"] == "stub"
+    assert main.os.environ["ONLY_IN_FILE"] == "from-file"

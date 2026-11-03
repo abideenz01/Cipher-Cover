@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { signIn } from "./session";
 
 function todos(page: Page) {
   return page.getByRole("list", { name: "To-do list" }).getByRole("listitem");
@@ -12,7 +13,7 @@ async function waitingCount(page: Page): Promise<number> {
 test("a run capped at three fills its to-do list and ticks it off", async ({
   page,
 }) => {
-  await page.goto("/");
+  await signIn(page);
   await expect(page.getByRole("button", { name: /^CLM-/ })).toHaveCount(35);
   const before = await waitingCount(page);
   await page.getByRole("spinbutton", { name: "Claims" }).fill("3");
@@ -30,7 +31,7 @@ test("a run capped at three fills its to-do list and ticks it off", async ({
 test("a decided claim shows the sections it read and relied on", async ({
   page,
 }) => {
-  await page.goto("/");
+  await signIn(page);
   const decided = page.getByRole("region", { name: "Decided", exact: true });
   await decided.getByRole("button", { name: /^CLM-/ }).first().click();
   const drawer = page.getByRole("complementary");
@@ -46,7 +47,7 @@ test("a decided claim shows the sections it read and relied on", async ({
 });
 
 test("Stop ends the run after the claim in hand", async ({ page }) => {
-  await page.goto("/");
+  await signIn(page);
   await expect(page.getByRole("button", { name: /^CLM-/ })).toHaveCount(35);
   await page.getByRole("checkbox", { name: "All" }).check();
   await page.getByRole("button", { name: "Run", exact: true }).click();

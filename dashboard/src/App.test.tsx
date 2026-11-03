@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { claim, POLICY, queueRun, run, stubApi, summary } from "./testing";
+import { claim, ME, POLICY, queueRun, run, stubApi, summary } from "./testing";
 
 const CLAIMS = Array.from({ length: 35 }, (_, i) =>
   summary(i + 1, i === 1 ? { customer_name: "Tom Becker" } : {}),
@@ -28,7 +28,7 @@ afterEach(() => {
 describe("the queue", () => {
   it("shows 35 cards in four columns, each with a labeled state chip", async () => {
     stubApi({ "GET /api/claims": CLAIMS });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     expect(await screen.findAllByRole("button", { name: /CLM-/ })).toHaveLength(
       35,
     );
@@ -48,7 +48,7 @@ describe("the queue", () => {
 
   it("shows the metrics in mono type", async () => {
     stubApi({ "GET /api/claims": CLAIMS });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     const strip = await screen.findByRole("region", { name: "Metrics" });
     const paid = await within(strip).findByText("$1,920.00");
     expect(paid.className).toContain("mono");
@@ -59,7 +59,7 @@ describe("the queue", () => {
 
   it("filters the board from the command bar", async () => {
     stubApi({ "GET /api/claims": CLAIMS });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     await screen.findAllByRole("button", { name: /CLM-/ });
     fireEvent.keyDown(window, { key: "/" });
     const search = screen.getByRole("searchbox");
@@ -74,13 +74,13 @@ describe("the queue", () => {
 
   it("says when the backend is down", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     expect(await screen.findByText(/backend is not responding/)).toBeDefined();
   });
 
   it("switches theme and remembers it", async () => {
     stubApi({ "GET /api/claims": [] });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Light mode" }));
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(localStorage.getItem("theme")).toBe("light");
@@ -91,7 +91,7 @@ describe("the queue", () => {
       "GET /api/claims": [],
       "POST /api/runs": queueRun({ status: "succeeded" }),
     });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     expect(await screen.findByText(/No runs yet/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "All" }));
@@ -110,7 +110,7 @@ describe("the queue", () => {
       "GET /api/claims": [],
       "POST /api/runs": new Error("Queue run q1 is still running."),
     });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     const field = await screen.findByRole("spinbutton", { name: "Claims" });
     fireEvent.change(field, { target: { value: "2" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
@@ -137,7 +137,7 @@ describe("the queue", () => {
       "GET /api/queue-runs": [live],
       "POST /api/queue-runs/q1/stop": queueRun({ status: "stopping" }),
     });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     const list = await screen.findByRole("list", { name: "To-do list" });
     expect(
       within(list)
@@ -175,7 +175,7 @@ describe("the queue", () => {
       cap: 0,
     });
     stubApi({ "GET /api/claims": [], "GET /api/queue-runs": [latest, older] });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     expect(await screen.findByText("Decided 5 claims.")).toBeDefined();
     expect(screen.getByText("It reached its cap.")).toBeDefined();
     expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
@@ -197,7 +197,7 @@ describe("the queue", () => {
         }),
       ],
     });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     const card = await screen.findByRole("button", { name: /CLM-1001/ });
     expect(within(card).getByText("Left for a handler")).toBeDefined();
   });
@@ -210,7 +210,7 @@ describe("the drawer", () => {
       "GET /api/claims/CLM-1002": claim(),
       "GET /api/policies/POL-2002": POLICY,
     });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /CLM-1002/ }));
     expect(await screen.findByText("My suitcase never arrived.")).toBeDefined();
     expect(await screen.findByText(/UnderCover Premium/)).toBeDefined();
@@ -233,7 +233,7 @@ describe("the drawer", () => {
       "POST /api/claims/CLM-1002/runs": () =>
         started++ ? new Error("Claim CLM-1002 is not waiting.") : {},
     });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /CLM-1002/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "Decision" }));
     const run = screen.getByRole("button", { name: "Run the agent" });
@@ -274,7 +274,7 @@ describe("the drawer", () => {
       "GET /api/claims/CLM-1002": decided,
       "GET /api/policies/POL-2002": POLICY,
     });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /CLM-1002/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "Decision" }));
     expect(screen.getByText("Approve")).toBeDefined();
@@ -314,7 +314,7 @@ describe("the drawer", () => {
       "GET /api/runs/r2": run({ run_id: "r2" }),
       "GET /api/runs/r2/events": [],
     });
-    render(<App />);
+    render(<App me={ME} onSignOut={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /CLM-1002/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "Trace" }));
     expect(

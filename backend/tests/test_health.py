@@ -1,8 +1,6 @@
-from fastapi.testclient import TestClient
+from backend.tests import sessions
 
-from backend.main import app
-
-client = TestClient(app)
+client = sessions.anyone()
 
 
 def test_health():

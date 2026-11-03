@@ -18,40 +18,48 @@ def short_name(name: str) -> str:
     return f"{first} {rest[-1][0]}." if rest else first
 
 
-def claim_row(conn: sqlite3.Connection, claim_id: str) -> sqlite3.Row:
-    """Return one claim's row, or raise 404."""
+def claim_row(conn: sqlite3.Connection, claim_id: str, tenant_id: str) -> sqlite3.Row:
+    """Return one of the tenant's claims, or raise 404, as for one that is not there."""
     row = conn.execute(
-        "SELECT * FROM claims WHERE claim_id = ?", (claim_id,)
+        "SELECT * FROM claims WHERE claim_id = ? AND tenant_id = ?",
+        (claim_id, tenant_id),
     ).fetchone()
     if row is None:
         raise HTTPException(404, f"There is no claim {claim_id}.")
     return row
 
 
-def policy_data(conn: sqlite3.Connection, policy_id: str) -> dict[str, Any]:
-    """Return one policy's record, or raise 404."""
+def policy_data(
+    conn: sqlite3.Connection, policy_id: str, tenant_id: str
+) -> dict[str, Any]:
+    """Return one of the tenant's policies, or raise 404."""
     row = conn.execute(
-        "SELECT data FROM policies WHERE policy_id = ?", (policy_id,)
+        "SELECT data FROM policies WHERE policy_id = ? AND tenant_id = ?",
+        (policy_id, tenant_id),
     ).fetchone()
     if row is None:
         raise HTTPException(404, f"There is no policy {policy_id}.")
     return json.loads(row["data"])
 
 
-def handler_row(conn: sqlite3.Connection, handler_id: str) -> sqlite3.Row:
-    """Return one handler's row, or raise 404."""
+def handler_row(
+    conn: sqlite3.Connection, handler_id: str, tenant_id: str
+) -> sqlite3.Row:
+    """Return one of the tenant's handlers, or raise 404."""
     row = conn.execute(
-        "SELECT * FROM handlers WHERE handler_id = ?", (handler_id,)
+        "SELECT * FROM handlers WHERE handler_id = ? AND tenant_id = ?",
+        (handler_id, tenant_id),
     ).fetchone()
     if row is None:
         raise HTTPException(404, f"There is no handler {handler_id}.")
     return row
 
 
-def customer_name(conn: sqlite3.Connection, customer_id: str) -> str:
-    """Return a customer's full name."""
+def customer_name(conn: sqlite3.Connection, customer_id: str, tenant_id: str) -> str:
+    """Return one of the tenant's customers' full name."""
     return conn.execute(
-        "SELECT name FROM customers WHERE customer_id = ?", (customer_id,)
+        "SELECT name FROM customers WHERE customer_id = ? AND tenant_id = ?",
+        (customer_id, tenant_id),
     ).fetchone()["name"]
 
 
@@ -97,10 +105,12 @@ def paid_cents(conn: sqlite3.Connection, claim_id: str) -> int:
     ).fetchone()[0]
 
 
-def policy_view(conn: sqlite3.Connection, policy_id: str) -> dict[str, Any]:
+def policy_view(
+    conn: sqlite3.Connection, policy_id: str, tenant_id: str
+) -> dict[str, Any]:
     """Return a policy with its plan's limits and add-ons."""
-    policy = policy_data(conn, policy_id)
-    plans = db.reference(conn, "plans")
+    policy = policy_data(conn, policy_id, tenant_id)
+    plans = db.reference(conn, "plans", tenant_id)
     plan = next(p for p in plans["plans"] if p["plan"] == policy["plan"])
     add_ons = [a for a in plans["add_ons"] if a["add_on"] in policy["add_ons"]]
     return policy | {
@@ -118,9 +128,11 @@ def decided(conn: sqlite3.Connection, claim_id: str) -> sqlite3.Row:
     return row
 
 
-def live_run(conn: sqlite3.Connection, run_id: str) -> sqlite3.Row:
-    """Return a claim run that is still running, or raise 409."""
-    row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+def live_run(conn: sqlite3.Connection, run_id: str, tenant_id: str) -> sqlite3.Row:
+    """Return one of the tenant's claim runs that is still running, or raise 409."""
+    row = conn.execute(
+        "SELECT * FROM runs WHERE run_id = ? AND tenant_id = ?", (run_id, tenant_id)
+    ).fetchone()
     if row is None or row["status"] != "running":
         raise HTTPException(409, f"There is no live claim run {run_id}.")
     return row

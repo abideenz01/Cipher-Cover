@@ -3,12 +3,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
 from backend import seed
 from backend.main import app
+from backend.tests import sessions
 
-client = TestClient(app)
+client = sessions.client()
 PERSONAL = {"email", "phone", "date_of_birth", "address"}
 
 
@@ -117,6 +117,7 @@ def test_seed_reads_only_the_records(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(data))
     monkeypatch.setenv("DB_PATH", str(tmp_path / "copy.db"))
     seed.seed(reset=True)
+    sessions.install()
     assert len(client.get("/api/claims").json()) == 35
 
 

@@ -3,12 +3,33 @@ import type {
   Claim,
   ClaimState,
   ClaimSummary,
+  Me,
   Policy,
   QueueRun,
   Run,
 } from "./api";
 
 type Handler = (body: unknown) => unknown;
+
+export const ME: Me = {
+  user_id: "USR-01",
+  name: "Dana Whitfield",
+  handler_id: "HND-01",
+  tenant_id: "T-UNDERCOVER",
+  tenant_name: "UnderCover Travel Insurance",
+  roles: ["claims_handler", "senior_handler"],
+  can_sign_off: true,
+  can_run: true,
+};
+
+export const TRAINEE: Me = {
+  ...ME,
+  user_id: "USR-04",
+  name: "Leon Abara",
+  handler_id: "HND-04",
+  roles: ["claims_handler"],
+  can_sign_off: false,
+};
 
 export const STATE_ORDER: ClaimState[] = [
   "waiting",
@@ -121,6 +142,14 @@ export const POLICY: Policy = {
   limits: { name: "UnderCover Premium" },
 };
 
+/** A stubbed answer with a status other than 200 or 409. */
+export class Refusal {
+  constructor(
+    readonly status: number,
+    readonly detail: string,
+  ) {}
+}
+
 export function stubApi(given: Record<string, unknown>) {
   const routes: Record<string, unknown> = {
     "GET /api/queue-runs": [],
@@ -142,6 +171,13 @@ export function stubApi(given: Record<string, unknown>) {
     const route = routes[key];
     const result: unknown =
       typeof route === "function" ? (route as Handler)(body) : route;
+    if (result instanceof Refusal) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ detail: result.detail }), {
+          status: result.status,
+        }),
+      );
+    }
     if (result instanceof Error) {
       return Promise.resolve(
         new Response(JSON.stringify({ detail: result.message }), {

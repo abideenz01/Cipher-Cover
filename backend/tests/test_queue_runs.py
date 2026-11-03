@@ -5,9 +5,10 @@ from fastapi.testclient import TestClient
 
 from backend import db, queue_runs, runner, runs
 from backend.main import app
+from backend.tests import sessions
 from backend.tests.test_decisions import decide
 
-client = TestClient(app)
+client = sessions.client()
 
 
 @pytest.fixture(autouse=True)
@@ -20,15 +21,28 @@ def start(cap=0):
     return client.post("/api/runs", json={"cap": cap})
 
 
+def agent(run_id):
+    """Return headers for the queue agent on a queue run."""
+    return sessions.queue_agent(run_id)
+
+
 def begin(run_id, claim_id):
     return client.post(
-        f"/api/queue-runs/{run_id}/attempts", json={"claim_id": claim_id}
+        f"/api/queue-runs/{run_id}/attempts",
+        json={"claim_id": claim_id},
+        headers=agent(run_id),
     )
 
 
 def end(claim_run, error="", failure=""):
+    with db.connect() as conn:
+        queue_run_id = conn.execute(
+            "SELECT queue_run_id FROM runs WHERE run_id = ?", (claim_run,)
+        ).fetchone()["queue_run_id"]
     body = {"error": error, "failure": failure}
-    return client.post(f"/api/runs/{claim_run}/finish", json=body).json()
+    return client.post(
+        f"/api/runs/{claim_run}/finish", json=body, headers=agent(queue_run_id)
+    ).json()
 
 
 def work(run_id, claim_id, error="", failure=""):
@@ -40,7 +54,17 @@ def work(run_id, claim_id, error="", failure=""):
 
 
 def finish(run_id, summary="Done."):
-    return client.post(f"/api/queue-runs/{run_id}/finish", json={"summary": summary})
+    return client.post(
+        f"/api/queue-runs/{run_id}/finish",
+        json={"summary": summary},
+        headers=agent(run_id),
+    )
+
+
+def write_todos(run_id, todos):
+    return client.put(
+        f"/api/queue-runs/{run_id}/todos", json={"todos": todos}, headers=agent(run_id)
+    )
 
 
 def queue_run(run_id):
@@ -175,7 +199,7 @@ def test_stop_finishes_the_claim_in_hand():
         {"claim_id": "CLM-1002", "status": "to_do", "note": ""},
         {"claim_id": "CLM-1003", "status": "done", "note": "refer"},
     ]
-    client.put(f"/api/queue-runs/{run_id}/todos", json={"todos": todos})
+    write_todos(run_id, todos)
     claim_run = begin(run_id, "CLM-1001").json()["run_id"]
     assert client.post(f"/api/queue-runs/{run_id}/stop").json()["status"] == "stopping"
     decide("CLM-1001", "refer", 0)
@@ -190,12 +214,11 @@ def test_stop_finishes_the_claim_in_hand():
     ]
     assert claim("CLM-1002")["state"] == "waiting"
     assert client.post(f"/api/queue-runs/{run_id}/stop").status_code == 409
-    response = client.put(f"/api/queue-runs/{run_id}/todos", json={"todos": []})
-    assert response.status_code == 409
+    assert write_todos(run_id, []).status_code == 409
 
 
 def test_an_agent_that_raises_frees_its_claims(monkeypatch):
-    def broken(run_id, on_step):
+    def broken(run_id, on_step, token):
         begin(run_id, "CLM-1001")
         raise RuntimeError("The queue agent broke.")
 
@@ -209,7 +232,7 @@ def test_an_agent_that_raises_frees_its_claims(monkeypatch):
 
 
 def test_an_agent_that_ends_without_a_summary_fails(monkeypatch):
-    monkeypatch.setattr(runner, "execute_queue", lambda run_id, on_step: None)
+    monkeypatch.setattr(runner, "execute_queue", lambda run_id, on_step, t: None)
     monkeypatch.setattr(runs, "spawn", lambda work: work())
     run = start().json()
     assert run["status"] == "failed"
@@ -217,7 +240,7 @@ def test_an_agent_that_ends_without_a_summary_fails(monkeypatch):
 
 
 def test_a_stand_in_works_the_queue(monkeypatch):
-    def stand_in(run_id, on_step):
+    def stand_in(run_id, on_step, token):
         on_step(run_id, {"kind": "usage", "name": "stub", "detail": {"tokens": 50}})
         on_step(
             run_id, {"kind": "tool_call", "name": "list_waiting_claims", "detail": {}}
@@ -241,6 +264,7 @@ def test_recovery_on_startup():
     claim_run = begin(run_id, "CLM-1001").json()["run_id"]
     with TestClient(app):
         pass
+    assert begin(run_id, "CLM-1002").status_code == 409
     assert claim("CLM-1001")["state"] == "waiting"
     assert claim("CLM-1001")["failed_attempts"] == 1
     run = client.get(f"/api/runs/{claim_run}").json()

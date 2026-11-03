@@ -10,12 +10,12 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from agent import voice
 from agent.voice_stub import ScriptedVoiceModel
-from backend import clock, db, store
+from backend import auth, clock, db, security_events, store
 from backend.voice import briefs, normalize
 
 INSTRUCTIONS = Path(__file__).parent.parent / "voice_instructions.md"
@@ -42,17 +42,17 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_voice)])
 
 
 class Turn(BaseModel):
-    """One spoken or typed request from a handler."""
+    """One spoken or typed request from the signed-in handler."""
 
     session_id: str
-    handler_id: str
     text: str
 
 
-class SignOffRequest(BaseModel):
-    """The handler who will confirm the sign-off on screen."""
-
-    handler_id: str
+def handler_of(who: auth.Principal) -> str:
+    """Return the handler the caller is, or refuse a caller who is not one."""
+    if not who.handler_id:
+        raise HTTPException(403, "Only a claims handler can use voice.")
+    return who.handler_id
 
 
 @config_router.get("/voice/config", operation_id="get_voice_config")
@@ -79,50 +79,57 @@ def check_rate(session_id: str) -> None:
     turns.append(now)
 
 
-def answer(body: Turn) -> dict[str, Any]:
+def answer(body: Turn, handler_id: str, token: str) -> dict[str, Any]:
     """Run the voice agent, with the scripted model when AGENT_STUB=1."""
     llm = ScriptedVoiceModel() if os.getenv("AGENT_STUB") == "1" else None
-    return voice.run_turn(body.session_id, body.handler_id, body.text, llm)
+    return voice.run_turn(body.session_id, handler_id, body.text, llm, token=token)
 
 
-def checked(action: dict[str, Any], handler_id: str) -> dict[str, Any]:
+def checked(
+    action: dict[str, Any], who: auth.Principal, handler_id: str
+) -> dict[str, Any]:
     """Keep a sign-off highlight only if a sign-off request backs it."""
     if action["type"] != "focus_signoff":
         return action
     with db.connect() as conn:
         request = conn.execute(
             "SELECT 1 FROM signoff_requests WHERE claim_id = ? AND handler_id = ?"
-            " AND expires_at > ?",
-            (action["claim_id"], handler_id, clock.stamp()),
+            " AND tenant_id = ? AND expires_at > ?",
+            (action["claim_id"], handler_id, who.tenant_id, clock.stamp()),
         ).fetchone()
     return action if request else {"type": "none", "claim_id": ""}
 
 
 @router.post("/voice/turn", operation_id="voice_turn")
-def voice_turn(body: Turn) -> dict[str, Any]:
+def voice_turn(body: Turn, who: auth.Who) -> dict[str, Any]:
     """Answer one request from a handler with a reply, speech and screen action."""
-    check_rate(body.session_id)
-    with db.connect() as conn:
-        store.handler_row(conn, body.handler_id)
+    handler_id = handler_of(who)
+    check_rate(f"{who.user_id}:{body.session_id}")
     timeout = float(os.getenv("VOICE_TURN_TIMEOUT_SECONDS") or "30")
+    with db.connect() as conn:
+        store.handler_row(conn, handler_id, who.tenant_id)
+        token = auth.issue(
+            conn, who.tenant_id, "voice", timeout + 30, user_id=who.user_id
+        )
     started = time.monotonic()
     try:
-        result = POOL.submit(answer, body).result(timeout=timeout)
+        result = POOL.submit(answer, body, handler_id, token).result(timeout=timeout)
         status = "succeeded"
-        result["ui_action"] = checked(result["ui_action"], body.handler_id)
+        result["ui_action"] = checked(result["ui_action"], who, handler_id)
     except TurnTimeout:
         none = {"type": "none", "claim_id": ""}
         result = {"reply": FALLBACK, "speech": FALLBACK, "ui_action": none, "tools": []}
         status = "failed"
     latency = round((time.monotonic() - started) * 1000)
     with db.connect() as conn:
+        auth.revoke_token(conn, token)
         conn.execute(
             "INSERT INTO voice_turns (session_id, handler_id, transcript, reply,"
-            " speech, ui_action, tools, status, latency_ms, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " speech, ui_action, tools, status, latency_ms, created_at, tenant_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 body.session_id,
-                body.handler_id,
+                handler_id,
                 body.text,
                 result["reply"],
                 result["speech"],
@@ -131,17 +138,20 @@ def voice_turn(body: Turn) -> dict[str, Any]:
                 status,
                 latency,
                 clock.stamp(),
+                who.tenant_id,
             ),
         )
     return result | {"status": status}
 
 
 @router.get("/voice/sessions/{session_id}", operation_id="list_voice_turns")
-def list_voice_turns(session_id: str) -> list[dict[str, Any]]:
-    """Return one session's turns for the captions panel."""
+def list_voice_turns(session_id: str, who: auth.Who) -> list[dict[str, Any]]:
+    """Return one of the caller's own sessions, for the captions panel."""
     with db.connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM voice_turns WHERE session_id = ? ORDER BY id", (session_id,)
+            "SELECT * FROM voice_turns WHERE session_id = ? AND handler_id = ?"
+            " AND tenant_id = ? ORDER BY id",
+            (session_id, handler_of(who), who.tenant_id),
         ).fetchall()
     return [
         dict(r)
@@ -151,14 +161,17 @@ def list_voice_turns(session_id: str) -> list[dict[str, Any]]:
 
 
 @router.get("/claims/search", operation_id="search_claims")
-def search_claims(text: str) -> list[dict[str, Any]]:
+def search_claims(text: str, who: auth.Who) -> list[dict[str, Any]]:
     """Find claims matching a spoken or typed claim number or a surname."""
     claim_id = normalize.claim_id(text)
     words = {w.strip(".,?!'s").lower() for w in text.split() if len(w) >= SHORTEST_NAME}
     with db.connect() as conn:
         rows = conn.execute(
             "SELECT claims.claim_id, customers.name FROM claims"
-            " JOIN customers USING (customer_id) ORDER BY claim_id"
+            " JOIN customers USING (customer_id)"
+            " WHERE claims.tenant_id = ? AND customers.tenant_id = ?"
+            " ORDER BY claim_id",
+            (who.tenant_id, who.tenant_id),
         ).fetchall()
         found = [
             r["claim_id"]
@@ -166,43 +179,43 @@ def search_claims(text: str) -> list[dict[str, Any]]:
             if r["claim_id"] == claim_id
             or (not claim_id and words & {n.lower() for n in r["name"].split()})
         ]
-        return [briefs.claim_brief(conn, c) for c in found]
+        return [briefs.claim_brief(conn, c, who.tenant_id) for c in found]
 
 
 @router.get("/claims/{claim_id}/brief", operation_id="get_claim_brief")
-def get_claim_brief(claim_id: str) -> dict[str, Any]:
+def get_claim_brief(claim_id: str, who: auth.Who) -> dict[str, Any]:
     """Return one claim's facts, with no free text."""
     with db.connect() as conn:
-        return briefs.claim_brief(conn, claim_id)
+        return briefs.claim_brief(conn, claim_id, who.tenant_id)
 
 
 @router.get("/claims/{claim_id}/decision-brief", operation_id="get_decision_brief")
-def get_decision_brief(claim_id: str) -> dict[str, Any]:
+def get_decision_brief(claim_id: str, who: auth.Who) -> dict[str, Any]:
     """Return the latest decision, payout and reason."""
     with db.connect() as conn:
-        return briefs.decision_brief(conn, claim_id)
+        return briefs.decision_brief(conn, claim_id, who.tenant_id)
 
 
 @router.get("/claims/{claim_id}/run-status", operation_id="get_run_status_brief")
-def get_run_status_brief(claim_id: str) -> dict[str, Any]:
+def get_run_status_brief(claim_id: str, who: auth.Who) -> dict[str, Any]:
     """Return the latest run on a claim and its outcome."""
     with db.connect() as conn:
-        return briefs.run_status_brief(conn, claim_id)
+        return briefs.run_status_brief(conn, claim_id, who.tenant_id)
 
 
 @router.get("/analytics/brief", operation_id="get_analytics_brief")
-def get_analytics_brief() -> dict[str, Any]:
+def get_analytics_brief(who: auth.Who) -> dict[str, Any]:
     """Return the number of claims in each state and the total paid."""
     with db.connect() as conn:
-        return briefs.analytics_brief(conn)
+        return briefs.analytics_brief(conn, who.tenant_id)
 
 
 @router.post("/claims/{claim_id}/signoff-request", operation_id="request_signoff")
-def request_signoff(claim_id: str, body: SignOffRequest) -> dict[str, Any]:
-    """Prepare a sign-off for one handler to confirm on screen."""
+def request_signoff(claim_id: str, who: auth.Who, request: Request) -> dict[str, Any]:
+    """Prepare a sign-off for the signed-in handler to confirm on screen."""
     with db.connect() as conn:
-        claim = store.claim_row(conn, claim_id)
-        handler = store.handler_row(conn, body.handler_id)
+        claim = store.claim_row(conn, claim_id, who.tenant_id)
+        handler = store.handler_row(conn, handler_of(who), who.tenant_id)
         if not handler["can_approve_over_limit"]:
             raise HTTPException(403, f"{handler['name']} is not allowed to sign off.")
         if claim["state"] != "waiting_for_signoff":
@@ -210,13 +223,24 @@ def request_signoff(claim_id: str, body: SignOffRequest) -> dict[str, Any]:
         now = clock.now()
         conn.execute(
             "INSERT INTO signoff_requests"
-            " (claim_id, handler_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            " (claim_id, handler_id, created_at, expires_at, tenant_id)"
+            " VALUES (?, ?, ?, ?, ?)",
             (
                 claim_id,
-                body.handler_id,
+                who.handler_id,
                 now.isoformat(timespec="seconds"),
                 (now + timedelta(minutes=10)).isoformat(timespec="seconds"),
+                who.tenant_id,
             ),
+        )
+        security_events.record(
+            conn,
+            who.tenant_id,
+            who.actor,
+            "signoff_request",
+            claim_id,
+            "ok",
+            auth.ip(request),
         )
     spoken = briefs.speak_claim_id(claim_id).capitalize()
     return {

@@ -51,6 +51,8 @@ lambda_package/
 
 # Local databases and data
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 qdrant_data/

@@ -43,8 +43,16 @@ A claim that fails before it is decided goes back in the queue to be tried again
 
 Everything is in `data/`, described in `data/README.md`: the claims queue, the policies, the customers, the plans, the handlers, the policy wording and the claims manual. The held-out claims in `data/evals/` are for checking the agent later and stay out of the queue.
 
+## Sign-in and tenants
+
+- Everyone signs in with an email and password. A session ends after 30 minutes idle or 12 hours, whichever comes first.
+- Each person belongs to one tenant (an insurer) and sees only that tenant's claims, policies, customers, runs and voice sessions. A record in another tenant is answered as not found.
+- Roles decide what a person may do. A claims handler reads the queue, runs the agent, sends claims back and uses voice. A senior handler can also sign off payouts over $1,000.00. An SIU investigator, an auditor and a tenant admin can read; the auditor and the admin can also read the security log. Nobody but the agent records a decision or pays, and the agent only through its own run.
+- Medical records and medical bills never go to the model unless the tenant has said they may. Agents see a customer's first name and last initial only.
+- Isolation between tenants is enforced by the application on SQLite. Production with more than one tenant's data needs PostgreSQL with row-level security first (`docs/ADR_POSTGRES.md`).
+
 ## Not for now
 
-- No sign-in. Everyone who uses the screens sees everything.
+- A tenant admin adds sign-ins, sets their roles, turns them off and on, and decides whether medical documents may go to the model. Creating a tenant is not for now: tenants come from `data/` when the database is seeded.
 - No real payments.
 - No messages to customers.

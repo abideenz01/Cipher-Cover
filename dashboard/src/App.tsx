@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   type ClaimSummary,
-  type Handler,
+  type Me,
   type QueueRun,
   type UiAction,
   type VoiceConfig,
@@ -14,6 +14,7 @@ import { MetricStrip } from "./components/MetricStrip";
 import { Rail, type View } from "./components/Rail";
 import { RunPanel } from "./components/RunPanel";
 import { isLive, matches } from "./format";
+import { Admin } from "./views/Admin";
 import { Instructions } from "./views/Instructions";
 import { SignOff, type Highlight } from "./views/SignOff";
 import { CaptionsPanel, ConsentNotice } from "./voice/CaptionsPanel";
@@ -26,7 +27,9 @@ type Theme = "dark" | "light";
 
 function viewFromHash(): View {
   const view = window.location.hash.replace("#/", "");
-  return view === "signoff" || view === "instructions" ? view : "queue";
+  return ["signoff", "instructions", "admin"].includes(view)
+    ? (view as View)
+    : "queue";
 }
 
 function useTheme(): [Theme, () => void] {
@@ -45,7 +48,10 @@ function useTheme(): [Theme, () => void] {
   ];
 }
 
-export function App() {
+export function App({
+  me,
+  onSignOut,
+}: Readonly<{ me: Me; onSignOut: () => void }>) {
   const [view, setView] = useState<View>(viewFromHash);
   const [claims, setClaims] = useState<ClaimSummary[]>([]);
   const [error, setError] = useState("");
@@ -54,8 +60,6 @@ export function App() {
   const [now, setNow] = useState(() => new Date());
   const [theme, toggleTheme] = useTheme();
   const [voiceConfig, setVoiceConfig] = useState<VoiceConfig | null>(null);
-  const [handlers, setHandlers] = useState<Handler[]>([]);
-  const [voiceHandler, setVoiceHandler] = useState("HND-01");
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   const [queueRuns, setQueueRuns] = useState<QueueRun[]>([]);
   const [shownRun, setShownRun] = useState("");
@@ -71,22 +75,21 @@ export function App() {
     return voiceConfig.provider === "stub" ? stubProvider : browserProvider();
   }, [voiceConfig]);
 
-  useEffect(() => {
-    if (provider) void api.listHandlers().then(setHandlers);
-  }, [provider]);
-
   const onAction = useCallback(
     (action: UiAction) => {
       if (action.type === "open_claim") setOpenId(action.claim_id);
       if (action.type === "focus_signoff") {
-        setHighlight({ claimId: action.claim_id, handlerId: voiceHandler });
+        setHighlight({ claimId: action.claim_id, handlerId: me.handler_id });
         window.location.hash = "#/signoff";
       }
     },
-    [voiceHandler],
+    [me.handler_id],
   );
 
-  const voice = useVoice({ provider, handlerId: voiceHandler, onAction });
+  const isAdmin = me.roles.includes("tenant_admin");
+  // Only a claims handler talks to the voice assistant.
+  const speaking = me.handler_id ? provider : null;
+  const voice = useVoice({ provider: speaking, onAction });
 
   const refresh = useCallback(() => {
     Promise.all([api.listClaims(), api.listQueueRuns()]).then(
@@ -140,7 +143,7 @@ export function App() {
 
   return (
     <div className="app">
-      <Rail view={view} />
+      <Rail view={view} who={me.name} admin={isAdmin} onSignOut={onSignOut} />
       <main className="main">
         <CommandBar
           search={search}
@@ -156,7 +159,7 @@ export function App() {
             api.stopQueueRun(runId).then(refresh, failed);
           }}
         >
-          {provider?.available && (
+          {speaking?.available && (
             <MicButton
               status={voice.status}
               onPress={voice.start}
@@ -178,6 +181,7 @@ export function App() {
         )}
         {view === "signoff" && (
           <SignOff
+            me={me}
             version={signoffVersion}
             now={now}
             highlight={highlight}
@@ -186,13 +190,12 @@ export function App() {
           />
         )}
         {view === "instructions" && <Instructions />}
+        {view === "admin" && <Admin me={me} />}
       </main>
-      {provider && (
+      {speaking && (
         <CaptionsPanel
           captions={voice.captions}
-          handlers={handlers}
-          handlerId={voiceHandler}
-          onHandler={setVoiceHandler}
+          speaker={`${me.handler_id} ${me.name}`}
           onSend={(text) => void voice.send(text)}
           onOpen={setOpenId}
         />

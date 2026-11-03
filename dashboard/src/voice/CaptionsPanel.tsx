@@ -1,5 +1,4 @@
 import { useState } from "react";
-import type { Handler } from "../api";
 import type { Caption } from "./useVoice";
 
 function CaptionText({
@@ -31,16 +30,12 @@ function CaptionText({
 
 export function CaptionsPanel({
   captions,
-  handlers,
-  handlerId,
-  onHandler,
+  speaker,
   onSend,
   onOpen,
 }: Readonly<{
   captions: Caption[];
-  handlers: Handler[];
-  handlerId: string;
-  onHandler: (handlerId: string) => void;
+  speaker: string;
   onSend: (text: string) => void;
   onOpen: (claimId: string) => void;
 }>) {
@@ -49,19 +44,7 @@ export function CaptionsPanel({
   return (
     <section className="captions" aria-label="Voice assistant">
       <div className="captions-head">
-        <select
-          aria-label="Acting handler"
-          value={handlerId}
-          onChange={(event) => {
-            onHandler(event.target.value);
-          }}
-        >
-          {handlers.map((h) => (
-            <option key={h.handler_id} value={h.handler_id}>
-              {h.handler_id} {h.name}
-            </option>
-          ))}
-        </select>
+        <span className="muted">Speaking as {speaker}</span>
         <button
           type="button"
           className="button"

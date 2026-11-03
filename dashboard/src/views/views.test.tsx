@@ -6,25 +6,10 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { Handler, SignOffItem } from "../api";
-import { stubApi } from "../testing";
+import type { Me, SignOffItem } from "../api";
+import { ME, stubApi, TRAINEE } from "../testing";
 import { Instructions } from "./Instructions";
 import { SignOff } from "./SignOff";
-
-const HANDLERS: Handler[] = [
-  {
-    handler_id: "HND-01",
-    name: "Dana Whitfield",
-    role: "Senior",
-    can_approve_over_limit: true,
-  },
-  {
-    handler_id: "HND-04",
-    name: "Leon Abara",
-    role: "In training",
-    can_approve_over_limit: false,
-  },
-];
 
 const ITEM: SignOffItem = {
   claim_id: "CLM-1011",
@@ -42,9 +27,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderSignOff(onChanged = vi.fn()) {
+function renderSignOff(onChanged = vi.fn(), me: Me = ME) {
   render(
     <SignOff
+      me={me}
       version="1"
       now={new Date()}
       highlight={{ claimId: "CLM-1011", handlerId: "HND-01" }}
@@ -54,10 +40,9 @@ function renderSignOff(onChanged = vi.fn()) {
   );
 }
 
-it("signs off only with a handler who may", async () => {
+it("signs off as the signed-in handler", async () => {
   const onChanged = vi.fn();
   const calls = stubApi({
-    "GET /api/handlers": HANDLERS,
     "GET /api/signoffs": [ITEM],
     "POST /api/claims/CLM-1011/sign-off": {},
   });
@@ -68,13 +53,8 @@ it("signs off only with a handler who may", async () => {
   expect(row.className).toContain("highlight");
   expect(within(row).getByText("Overdue")).toBeDefined();
   expect(within(row).getByText(/Waited 2 h/)).toBeDefined();
-  const select = within(row).getByRole("combobox");
+  expect(within(row).queryByRole("combobox")).toBeNull();
   const signOff = within(row).getByRole("button", { name: "Sign off" });
-  await screen.findByRole("option", { name: /HND-04/ });
-  fireEvent.change(select, { target: { value: "HND-04" } });
-  expect((signOff as HTMLButtonElement).disabled).toBe(true);
-  expect(within(row).getByText(/cannot sign off/)).toBeDefined();
-  fireEvent.change(select, { target: { value: "HND-01" } });
   expect((signOff as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(signOff);
   await vi.waitFor(() => {
@@ -82,13 +62,24 @@ it("signs off only with a handler who may", async () => {
   });
   expect(calls.at(-1)).toEqual({
     key: "POST /api/claims/CLM-1011/sign-off",
-    body: { handler_id: "HND-01" },
+    body: {},
   });
 });
 
+it("does not let a handler in training sign off", async () => {
+  stubApi({ "GET /api/signoffs": [ITEM] });
+  renderSignOff(vi.fn(), TRAINEE);
+  const row = await screen.findByRole("listitem", {
+    name: "Sign-off CLM-1011",
+  });
+  const signOff = within(row).getByRole("button", { name: "Sign off" });
+  expect((signOff as HTMLButtonElement).disabled).toBe(true);
+  expect(within(row).getByText(/Leon Abara cannot sign off/)).toBeDefined();
+  expect(within(row).queryByRole("button", { name: /Confirm/ })).toBeNull();
+});
+
 it("sends back with a reason and shows refusals", async () => {
-  stubApi({
-    "GET /api/handlers": HANDLERS,
+  const calls = stubApi({
     "GET /api/signoffs": [ITEM],
     "POST /api/claims/CLM-1011/send-back": new Error("Not waiting."),
   });
@@ -96,21 +87,18 @@ it("sends back with a reason and shows refusals", async () => {
   const row = await screen.findByRole("listitem", {
     name: "Sign-off CLM-1011",
   });
-  await screen.findByRole("option", { name: /HND-04/ });
   const sendBack = within(row).getByRole("button", { name: "Send back" });
-  fireEvent.change(within(row).getByRole("combobox"), {
-    target: { value: "HND-04" },
-  });
   expect((sendBack as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(within(row).getByRole("textbox"), {
     target: { value: "Check the receipts." },
   });
   fireEvent.click(sendBack);
   expect(await within(row).findByText("Not waiting.")).toBeDefined();
+  expect(calls.at(-1)?.body).toEqual({ reason: "Check the receipts." });
 });
 
 it("says when nothing is waiting", async () => {
-  stubApi({ "GET /api/handlers": [], "GET /api/signoffs": [] });
+  stubApi({ "GET /api/signoffs": [] });
   renderSignOff();
   expect(
     await screen.findByText(/Nothing is waiting for sign-off/),

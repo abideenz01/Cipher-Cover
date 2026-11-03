@@ -1,0 +1,134 @@
+[
+  {
+    "customer_id": "CUS-5001",
+    "name": "Ines Calder",
+    "email": "ines.calder@example.com",
+    "phone": "+44 113 496 0100",
+    "date_of_birth": "1990-02-11",
+    "address": {
+      "street": "10 Example Row",
+      "city": "Leeds",
+      "postcode": "LS1 4AB"
+    },
+    "customer_since": "2023-01-15",
+    "previous_claims": []
+  },
+  {
+    "customer_id": "CUS-5002",
+    "name": "Rohan Mehta",
+    "email": "rohan.mehta@example.com",
+    "phone": "+44 113 496 0101",
+    "date_of_birth": "1984-07-23",
+    "address": {
+      "street": "11 Example Row",
+      "city": "Bristol",
+      "postcode": "BS1 5TR"
+    },
+    "customer_since": "2024-02-15",
+    "previous_claims": []
+  },
+  {
+    "customer_id": "CUS-5003",
+    "name": "Clara Novak",
+    "email": "clara.novak@example.com",
+    "phone": "+44 113 496 0102",
+    "date_of_birth": "1979-11-02",
+    "address": {
+      "street": "12 Example Row",
+      "city": "York",
+      "postcode": "YO1 7HH"
+    },
+    "customer_since": "2025-03-15",
+    "previous_claims": [
+      {
+        "claim_id": "CLM-4120",
+        "filed_on": "2025-09-02",
+        "incident_date": "2025-08-28",
+        "claim_type": "baggage_delay",
+        "summary": "Bag arrived a day late in Porto",
+        "outcome": "approved",
+        "amount_paid": 85.0
+      }
+    ]
+  },
+  {
+    "customer_id": "CUS-5004",
+    "name": "Theo Lindqvist",
+    "email": "theo.lindqvist@example.com",
+    "phone": "+44 113 496 0103",
+    "date_of_birth": "1995-05-30",
+    "address": {
+      "street": "13 Example Row",
+      "city": "Bath",
+      "postcode": "BA1 1LZ"
+    },
+    "customer_since": "2023-04-15",
+    "previous_claims": []
+  },
+  {
+    "customer_id": "CUS-5005",
+    "name": "Amara Eze",
+    "email": "amara.eze@example.com",
+    "phone": "+44 113 496 0104",
+    "date_of_birth": "1988-09-17",
+    "address": {
+      "street": "14 Example Row",
+      "city": "Cardiff",
+      "postcode": "CF10 1EP"
+    },
+    "customer_since": "2024-05-15",
+    "previous_claims": []
+  },
+  {
+    "customer_id": "CUS-5006",
+    "name": "Jonah Whitlock",
+    "email": "jonah.whitlock@example.com",
+    "phone": "+44 113 496 0105",
+    "date_of_birth": "1972-12-05",
+    "address": {
+      "street": "15 Example Row",
+      "city": "Norwich",
+      "postcode": "NR2 1NE"
+    },
+    "customer_since": "2025-06-15",
+    "previous_claims": [
+      {
+        "claim_id": "CLM-4188",
+        "filed_on": "2025-11-14",
+        "incident_date": "2025-11-09",
+        "claim_type": "trip_delay",
+        "summary": "Ferry cancelled by a storm",
+        "outcome": "approved",
+        "amount_paid": 120.0
+      }
+    ]
+  },
+  {
+    "customer_id": "CUS-5007",
+    "name": "Sofia Marchetti",
+    "email": "sofia.marchetti@example.com",
+    "phone": "+44 113 496 0106",
+    "date_of_birth": "1993-03-19",
+    "address": {
+      "street": "16 Example Row",
+      "city": "Exeter",
+      "postcode": "EX1 1HS"
+    },
+    "customer_since": "2023-07-15",
+    "previous_claims": []
+  },
+  {
+    "customer_id": "CUS-5008",
+    "name": "Kai Thornbury",
+    "email": "kai.thornbury@example.com",
+    "phone": "+44 113 496 0107",
+    "date_of_birth": "1986-08-08",
+    "address": {
+      "street": "17 Example Row",
+      "city": "Durham",
+      "postcode": "DH1 3NJ"
+    },
+    "customer_since": "2024-08-15",
+    "previous_claims": []
+  }
+]

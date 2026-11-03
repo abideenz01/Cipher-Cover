@@ -1,11 +1,9 @@
 from typing import Any
 
-from fastapi.testclient import TestClient
-
 from backend import db, runs
-from backend.main import app
+from backend.tests import sessions
 
-client = TestClient(app)
+client = sessions.client()
 
 
 def lease(claim_id: str) -> str:
@@ -15,13 +13,22 @@ def lease(claim_id: str) -> str:
             "SELECT run_id FROM runs WHERE claim_id = ? AND status = 'running'",
             (claim_id,),
         ).fetchone()
-    return row["run_id"] if row else runs.begin(claim_id)
+    return row["run_id"] if row else runs.begin(claim_id, sessions.TENANT)
+
+
+def agent(claim_id: str) -> dict[str, str]:
+    """Return headers for the claim agent on the claim's live run."""
+    return sessions.claim_agent(lease(claim_id))
 
 
 def read(claim_id: str, source: str = "wording", number: int = 5) -> None:
     """Read a section on the claim's live run."""
     params = {"run_id": lease(claim_id)}
-    client.get(f"/api/documents/{source}/sections/{number}", params=params)
+    client.get(
+        f"/api/documents/{source}/sections/{number}",
+        params=params,
+        headers=agent(claim_id),
+    )
 
 
 def lines(claim_id: str) -> list[dict[str, Any]]:
@@ -39,7 +46,9 @@ def lines(claim_id: str) -> list[dict[str, Any]]:
 
 def calculate(claim_id: str) -> Any:
     body = {"run_id": lease(claim_id), "lines": lines(claim_id), "paid_by_others": 0}
-    return client.post(f"/api/claims/{claim_id}/calculate", json=body)
+    return client.post(
+        f"/api/claims/{claim_id}/calculate", json=body, headers=agent(claim_id)
+    )
 
 
 def decide(
@@ -54,12 +63,16 @@ def decide(
         "sections": ["wording-5"] if sections is None else sections,
         "model": "stub",
     }
-    return client.post(f"/api/claims/{claim_id}/decision", json=body)
+    return client.post(
+        f"/api/claims/{claim_id}/decision", json=body, headers=agent(claim_id)
+    )
 
 
 def pay(claim_id: str, amount: float) -> Any:
     body = {"run_id": lease(claim_id), "amount": amount}
-    return client.post(f"/api/claims/{claim_id}/pay", json=body)
+    return client.post(
+        f"/api/claims/{claim_id}/pay", json=body, headers=agent(claim_id)
+    )
 
 
 def state(claim_id: str) -> str:
@@ -135,8 +148,10 @@ def test_a_claim_is_decided_once():
 
 def test_writes_need_the_claims_own_live_run():
     other = lease("CLM-1003")
+    own = agent("CLM-1001")
     body = {"run_id": other, "lines": lines("CLM-1001"), "paid_by_others": 0}
-    assert client.post("/api/claims/CLM-1001/calculate", json=body).status_code == 409
+    response = client.post("/api/claims/CLM-1001/calculate", json=body, headers=own)
+    assert response.status_code == 409
     for run_id in ("", "nope", other):
         decision = {
             "run_id": run_id,
@@ -146,16 +161,22 @@ def test_writes_need_the_claims_own_live_run():
             "sections": ["wording-5"],
             "model": "stub",
         }
-        response = client.post("/api/claims/CLM-1001/decision", json=decision)
+        response = client.post(
+            "/api/claims/CLM-1001/decision", json=decision, headers=own
+        )
         assert response.status_code == 409
         payment = {"run_id": run_id, "amount": 1.0}
-        assert client.post("/api/claims/CLM-1001/pay", json=payment).status_code == 409
+        response = client.post("/api/claims/CLM-1001/pay", json=payment, headers=own)
+        assert response.status_code == 409
     finished = lease("CLM-1004")
     runs.finish(finished, "CLM-1004", "Stopped.")
     decision |= {"run_id": finished}
-    assert (
-        client.post("/api/claims/CLM-1004/decision", json=decision).status_code == 409
+    response = client.post(
+        "/api/claims/CLM-1004/decision",
+        json=decision,
+        headers=sessions.claim_agent(finished),
     )
+    assert response.status_code == 409
 
 
 def test_a_decision_must_cite_what_it_read():
@@ -177,5 +198,7 @@ def test_a_decision_needs_a_reason():
         "sections": ["wording-5"],
         "model": "stub",
     }
-    response = client.post("/api/claims/CLM-1002/decision", json=body)
+    response = client.post(
+        "/api/claims/CLM-1002/decision", json=body, headers=agent("CLM-1002")
+    )
     assert response.json()["detail"] == "The reason is missing."

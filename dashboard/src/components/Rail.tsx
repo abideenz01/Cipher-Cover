@@ -1,4 +1,4 @@
-export type View = "queue" | "signoff" | "instructions";
+export type View = "queue" | "signoff" | "instructions" | "admin";
 
 const ITEMS: { view: View; label: string; path: string }[] = [
   { view: "queue", label: "Queue", path: "M4 5h16M4 12h16M4 19h10" },
@@ -10,10 +10,27 @@ const ITEMS: { view: View; label: string; path: string }[] = [
   },
 ];
 
-export function Rail({ view }: Readonly<{ view: View }>) {
+const ADMIN = {
+  view: "admin" as const,
+  label: "Admin",
+  path: "M12 4a4 4 0 110 8 4 4 0 010-8zM4 20c0-4 4-6 8-6s8 2 8 6",
+};
+
+export function Rail({
+  view,
+  who,
+  admin = false,
+  onSignOut,
+}: Readonly<{
+  view: View;
+  who: string;
+  admin?: boolean;
+  onSignOut: () => void;
+}>) {
+  const items = admin ? [...ITEMS, ADMIN] : ITEMS;
   return (
     <nav className="rail" aria-label="Main">
-      {ITEMS.map((item) => (
+      {items.map((item) => (
         <a
           key={item.view}
           className="rail-item"
@@ -32,6 +49,12 @@ export function Rail({ view }: Readonly<{ view: View }>) {
           {item.label}
         </a>
       ))}
+      <div className="rail-who">
+        <span className="muted">{who}</span>
+        <button type="button" className="button" onClick={onSignOut}>
+          Sign out
+        </button>
+      </div>
     </nav>
   );
 }

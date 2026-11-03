@@ -214,16 +214,19 @@ cp .env.example .env    # then add your OPENROUTER_API_KEY
 npm run dev             # backend on :8000, dashboard on :5173
 ```
 
-Open <http://localhost:5173>, set the number of claims in the command bar and press **Run**. The database (`undercover.db`) is created and seeded from `data/` on first start.
+Open <http://localhost:5173> and sign in, then set the number of claims in the command bar and press **Run**. The database (`undercover.db`) is created and seeded from `data/` on first start.
 
-> **Upgrading from the pilot?** The harness changes the database schema. Rebuild it with `uv run -m backend.seed --reset`.
+> **Signing in.** The first start seeds two fictional insurers. UnderCover has seven demo sign-ins: one per handler in `data/handlers.json` (for example `dana.whitfield@undercover.example`, a senior handler who can sign off), plus `admin@undercover.example` and `auditor@undercover.example`. Acme Travel Cover (`data/tenants/acme/`, 10 claims) has `ada.okonkwo@acme.example` and three more. Neither insurer can see the other's claims. Set `DEMO_PASSWORD` in `.env` before that first start to give them all that password. Otherwise each gets a random password, printed once in the backend's output. To start again, stop the backend and run `uv run -m backend.seed --reset`.
+
+> **Upgrading?** A database from the harness is migrated in place on startup: it gains tenants, sign-ins and the security log, and keeps its claims and decisions. A database from the pilot must be rebuilt with `uv run -m backend.seed --reset`.
 
 > **No API key?** Set `AGENT_STUB=1` to use the scripted models, or set `MODEL_NAME=openrouter/free` to use a free model.
 
-You can also start a run from the command line:
+You can also start a run from the command line, with a session token as a bearer token:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/runs -H "Content-Type: application/json" -d '{"cap": 5}'
+TOKEN=$(curl -s -c - http://127.0.0.1:8000/api/auth/login -H "Content-Type: application/json"   -d '{"email": "dana.whitfield@undercover.example", "password": "..."}' | awk '/cc_session/ {print $7}')
+curl -X POST http://127.0.0.1:8000/api/runs -H "Authorization: Bearer $TOKEN"   -H "Content-Type: application/json" -d '{"cap": 5}'
 ```
 
 ### Useful commands
@@ -235,6 +238,8 @@ curl -X POST http://127.0.0.1:8000/api/runs -H "Content-Type: application/json" 
 | `npm run format` | Format Python and TypeScript |
 | `npm run e2e` | Playwright end-to-end tests only |
 | `uv run -m backend.seed --reset` | Rebuild the database from `data/` |
+| `uv run -m evals.run --set queue` | Score the agent on an evaluation set (`--model real` costs money; see [docs/EVALUATION.md](docs/EVALUATION.md)) |
+| `uv run -m evals.compare A B` | Compare two evaluation runs |
 
 ## Configuration
 
@@ -254,6 +259,11 @@ All settings live in `.env` (see [`.env.example`](.env.example)).
 | `VOICE_PROVIDER` | `browser` | `browser` (Chrome or Edge), or `stub` for tests |
 | `VOICE_MODEL_NAME` | | Model for the voice agent (defaults to `MODEL_NAME`) |
 | `VOICE_TURNS_PER_MINUTE` | `20` | Per-session voice rate limit |
+| `DEMO_PASSWORD` | | Password for every demo sign-in when the database is first seeded; random ones are printed if unset |
+| `COOKIE_SECURE` | `1` | `0` sends the session cookie over plain http (only needed off localhost) |
+| `SESSION_IDLE_MINUTES` | `30` | A session ends after this long without a request |
+| `SESSION_HOURS` | `12` | A session ends this long after sign-in, however busy |
+| `API_DOCS` | `0` | `1` serves `/docs` and `/openapi.json`, which are outside the sign-in check |
 
 The time allowed on one claim is `agent_run_timeout_seconds` (120) in `data/company.json`.
 

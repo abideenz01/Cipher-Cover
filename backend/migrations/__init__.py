@@ -10,12 +10,22 @@ import sqlite3
 from types import ModuleType
 
 from backend import clock
-from backend.migrations import m0001_baseline
+from backend.migrations import (
+    m0001_baseline,
+    m0002_tenancy,
+    m0003_auth,
+    m0004_tenant_settings,
+)
 from backend.migrations.schema import SchemaMismatch
 
 __all__ = ["MIGRATIONS", "SchemaMismatch", "applied", "apply", "head"]
 
-MIGRATIONS: list[ModuleType] = [m0001_baseline]
+MIGRATIONS: list[ModuleType] = [
+    m0001_baseline,
+    m0002_tenancy,
+    m0003_auth,
+    m0004_tenant_settings,
+]
 
 
 def applied(conn: sqlite3.Connection) -> list[int]:

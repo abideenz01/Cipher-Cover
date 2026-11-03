@@ -1,0 +1,357 @@
+[
+  {
+    "claim_id": "CLM-5001",
+    "policy_id": "POL-5001",
+    "customer_id": "CUS-5001",
+    "claim_type": "trip_delay",
+    "submitted_on": "2026-07-12",
+    "incident_date": "2026-07-09",
+    "incident_location": "Lisbon, Portugal",
+    "summary": "Return flight delayed overnight by a strike",
+    "story": "My flight home from Lisbon was delayed until the next day by an air traffic control strike. I stayed at an airport hotel and paid for meals and a taxi.",
+    "items": [
+      {
+        "description": "Airport hotel, one night",
+        "category": "accommodation",
+        "amount": 180.0
+      },
+      {
+        "description": "Dinner and breakfast",
+        "category": "meals",
+        "amount": 60.0
+      },
+      {
+        "description": "Taxi to the hotel and back",
+        "category": "transport",
+        "amount": 40.0
+      }
+    ],
+    "amount_claimed": 280.0,
+    "documents": [
+      {
+        "name": "Delay notice from Northwind Air",
+        "type": "carrier_report",
+        "content": "Northwind Air flight NW 204 Lisbon to Leeds Bradford on July 9, 2026 was delayed 19 hours because of industrial action."
+      },
+      {
+        "name": "Hotel receipt",
+        "type": "receipt",
+        "content": "Hotel Tejo Airport. One night, July 9, 2026. Total 180.00."
+      }
+    ]
+  },
+  {
+    "claim_id": "CLM-5002",
+    "policy_id": "POL-5002",
+    "customer_id": "CUS-5002",
+    "claim_type": "baggage",
+    "submitted_on": "2026-06-15",
+    "incident_date": "2026-06-12",
+    "incident_location": "Barcelona, Spain",
+    "summary": "Checked suitcase lost on the way out",
+    "story": "My checked suitcase never arrived in Barcelona and the airline declared it lost after three weeks. I am claiming the case and what was in it.",
+    "items": [
+      {
+        "description": "Suitcase",
+        "category": "luggage",
+        "amount": 260.0
+      },
+      {
+        "description": "Clothes",
+        "category": "clothing",
+        "amount": 400.0
+      },
+      {
+        "description": "Walking shoes",
+        "category": "clothing",
+        "amount": 120.0
+      }
+    ],
+    "amount_claimed": 780.0,
+    "documents": [
+      {
+        "name": "Property irregularity report",
+        "type": "carrier_report",
+        "content": "Northwind Air PIR BCN-NW-55102. One checked bag, not located after 21 days, declared lost."
+      },
+      {
+        "name": "Receipts for the suitcase and clothes",
+        "type": "receipt",
+        "content": "Suitcase 260.00. Clothes 400.00. Shoes 120.00."
+      }
+    ]
+  },
+  {
+    "claim_id": "CLM-5003",
+    "policy_id": "POL-5003",
+    "customer_id": "CUS-5003",
+    "claim_type": "baggage",
+    "submitted_on": "2026-08-09",
+    "incident_date": "2026-08-06",
+    "incident_location": "Kyoto, Japan",
+    "summary": "Laptop and headphones stolen from a hotel room",
+    "story": "My laptop and headphones were taken from my hotel room in Kyoto while I was out. I reported it to the police the same evening.",
+    "items": [
+      {
+        "description": "Laptop",
+        "category": "electronics",
+        "amount": 1400.0
+      },
+      {
+        "description": "Noise-cancelling headphones",
+        "category": "electronics",
+        "amount": 300.0
+      }
+    ],
+    "amount_claimed": 1700.0,
+    "documents": [
+      {
+        "name": "Police report",
+        "type": "police_report",
+        "content": "Kyoto Prefectural Police report 2026-0806-311. Theft of a laptop and headphones from a hotel room."
+      },
+      {
+        "name": "Receipts",
+        "type": "receipt",
+        "content": "Laptop 1,400.00. Headphones 300.00."
+      }
+    ]
+  },
+  {
+    "claim_id": "CLM-5004",
+    "policy_id": "POL-5004",
+    "customer_id": "CUS-5004",
+    "claim_type": "emergency_medical",
+    "submitted_on": "2026-05-27",
+    "incident_date": "2026-05-24",
+    "incident_location": "Crete, Greece",
+    "summary": "Treated at a clinic for a broken wrist",
+    "story": "I fell on a coastal path and broke my wrist. A clinic in Chania set it in a cast and gave me painkillers.",
+    "items": [
+      {
+        "description": "Clinic treatment and cast",
+        "category": "medical",
+        "amount": 850.0
+      },
+      {
+        "description": "Medicine",
+        "category": "medical",
+        "amount": 70.0
+      }
+    ],
+    "amount_claimed": 920.0,
+    "documents": [
+      {
+        "name": "Clinic notes",
+        "type": "medical_record",
+        "content": "Chania Coastal Clinic. Patient Theo Lindqvist. Distal radius fracture, closed reduction, cast applied. Follow-up advised at home."
+      },
+      {
+        "name": "Clinic invoice",
+        "type": "medical_bill",
+        "content": "Treatment and cast 850.00. Medicine 70.00."
+      }
+    ]
+  },
+  {
+    "claim_id": "CLM-5005",
+    "policy_id": "POL-5005",
+    "customer_id": "CUS-5005",
+    "claim_type": "trip_cancellation",
+    "submitted_on": "2026-09-06",
+    "incident_date": "2026-09-03",
+    "incident_location": "Marrakesh, Morocco",
+    "summary": "Trip cancelled after a family bereavement",
+    "story": "My father died a week before we were due to travel, so I cancelled the trip. The tour company kept the non-refundable balance.",
+    "items": [
+      {
+        "description": "Non-refundable tour balance",
+        "category": "travel",
+        "amount": 1800.0
+      }
+    ],
+    "amount_claimed": 1800.0,
+    "documents": [
+      {
+        "name": "Tour company cancellation letter",
+        "type": "letter",
+        "content": "Atlas Trails confirms cancellation of booking AT-7731. The balance of 1,800.00 is non-refundable."
+      },
+      {
+        "name": "Death certificate extract",
+        "type": "other",
+        "content": "Certified extract confirming the death of the traveler's father on September 2, 2026."
+      }
+    ]
+  },
+  {
+    "claim_id": "CLM-5006",
+    "policy_id": "POL-5006",
+    "customer_id": "CUS-5006",
+    "claim_type": "passport",
+    "submitted_on": "2026-04-09",
+    "incident_date": "2026-04-06",
+    "incident_location": "Prague, Czechia",
+    "summary": "Passport stolen, emergency document needed",
+    "story": "My passport was stolen on a tram in Prague. I got an emergency travel document from the embassy to fly home.",
+    "items": [
+      {
+        "description": "Emergency travel document",
+        "category": "documents",
+        "amount": 145.0
+      },
+      {
+        "description": "Passport photos",
+        "category": "documents",
+        "amount": 15.0
+      }
+    ],
+    "amount_claimed": 160.0,
+    "documents": [
+      {
+        "name": "Police report",
+        "type": "police_report",
+        "content": "Prague Police report 4471/2026. Passport reported stolen on April 6, 2026."
+      },
+      {
+        "name": "Embassy receipt",
+        "type": "receipt",
+        "content": "Emergency travel document 145.00. Photos 15.00."
+      }
+    ]
+  },
+  {
+    "claim_id": "CLM-5007",
+    "policy_id": "POL-5007",
+    "customer_id": "CUS-5007",
+    "claim_type": "baggage_delay",
+    "submitted_on": "2026-07-23",
+    "incident_date": "2026-07-20",
+    "incident_location": "Dubrovnik, Croatia",
+    "summary": "Bag arrived two days late",
+    "story": "My bag arrived two days after I did, so I bought clothes and toiletries to get by.",
+    "items": [
+      {
+        "description": "Clothes and toiletries",
+        "category": "essentials",
+        "amount": 210.0
+      }
+    ],
+    "amount_claimed": 210.0,
+    "documents": [
+      {
+        "name": "Delayed bag report",
+        "type": "carrier_report",
+        "content": "Northwind Air delayed baggage report DBV-NW-2207. Bag delivered July 22, 2026, 49 hours after arrival."
+      },
+      {
+        "name": "Receipts",
+        "type": "receipt",
+        "content": "Essentials 210.00."
+      }
+    ]
+  },
+  {
+    "claim_id": "CLM-5008",
+    "policy_id": "POL-5008",
+    "customer_id": "CUS-5008",
+    "claim_type": "trip_interruption",
+    "submitted_on": "2026-10-12",
+    "incident_date": "2026-10-09",
+    "incident_location": "Vancouver, Canada",
+    "summary": "Flew home early because of a house fire",
+    "story": "A fire damaged my home while I was away, so I flew back early to deal with it.",
+    "items": [
+      {
+        "description": "One-way flight home",
+        "category": "travel",
+        "amount": 950.0
+      }
+    ],
+    "amount_claimed": 950.0,
+    "documents": [
+      {
+        "name": "Fire service report",
+        "type": "letter",
+        "content": "Durham Fire Service attended a fire at the traveler's home on October 8, 2026."
+      },
+      {
+        "name": "Flight receipt",
+        "type": "receipt",
+        "content": "One-way Vancouver to Newcastle 950.00."
+      }
+    ]
+  },
+  {
+    "claim_id": "CLM-5009",
+    "policy_id": "POL-5009",
+    "customer_id": "CUS-5001",
+    "claim_type": "trip_delay",
+    "submitted_on": "2026-09-28",
+    "incident_date": "2026-09-29",
+    "incident_location": "Nice, France",
+    "summary": "Overnight delay after a cancelled train",
+    "story": "My train to the airport was cancelled and I missed the last flight, so I stayed the night.",
+    "items": [
+      {
+        "description": "Hotel, one night",
+        "category": "accommodation",
+        "amount": 220.0
+      },
+      {
+        "description": "Meals",
+        "category": "meals",
+        "amount": 90.0
+      }
+    ],
+    "amount_claimed": 310.0,
+    "documents": [
+      {
+        "name": "Rail cancellation notice",
+        "type": "carrier_report",
+        "content": "SNCF confirms the cancellation of train 6172 on September 29, 2026."
+      },
+      {
+        "name": "Hotel receipt",
+        "type": "receipt",
+        "content": "Hotel Promenade. One night 220.00. Meals 90.00."
+      }
+    ]
+  },
+  {
+    "claim_id": "CLM-5010",
+    "policy_id": "POL-5010",
+    "customer_id": "CUS-5006",
+    "claim_type": "baggage",
+    "submitted_on": "2026-08-18",
+    "incident_date": "2026-08-15",
+    "incident_location": "Galway, Ireland",
+    "summary": "Backpack and jacket stolen from a hire car",
+    "story": "Someone broke into the hire car and took my backpack and rain jacket.",
+    "items": [
+      {
+        "description": "Backpack",
+        "category": "luggage",
+        "amount": 140.0
+      },
+      {
+        "description": "Rain jacket",
+        "category": "clothing",
+        "amount": 180.0
+      }
+    ],
+    "amount_claimed": 320.0,
+    "documents": [
+      {
+        "name": "Garda report",
+        "type": "police_report",
+        "content": "Garda Siochana report GW-2026-8812. Theft from a vehicle on August 15, 2026."
+      },
+      {
+        "name": "Receipts",
+        "type": "receipt",
+        "content": "Backpack 140.00. Jacket 180.00."
+      }
+    ]
+  }
+]

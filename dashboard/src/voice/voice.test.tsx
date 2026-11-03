@@ -9,17 +9,8 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../App";
 import type { UiAction } from "../api";
-import { claim, POLICY, stubApi } from "../testing";
+import { claim, ME, POLICY, stubApi } from "../testing";
 import { STUB_TRANSCRIPT, stubProvider } from "./providers/stub";
-
-const HANDLERS = [
-  {
-    handler_id: "HND-01",
-    name: "Dana Whitfield",
-    role: "Senior",
-    can_approve_over_limit: true,
-  },
-];
 
 const SIGNOFF = {
   claim_id: "CLM-1011",
@@ -58,7 +49,6 @@ function setup(action: UiAction, enabled = true) {
   return stubApi({
     "GET /api/claims": [claim({ claim_id: "CLM-1024" })],
     "GET /api/voice/config": { enabled, provider: "browser" },
-    "GET /api/handlers": HANDLERS,
     "GET /api/signoffs": [SIGNOFF],
     "GET /api/claims/CLM-1024": claim({ claim_id: "CLM-1024" }),
     "GET /api/policies/POL-2002": POLICY,
@@ -96,7 +86,7 @@ async function mic() {
 
 it("sends what it heard and opens the claim it is told to", async () => {
   const calls = setup({ type: "open_claim", claim_id: "CLM-1024" });
-  render(<App />);
+  render(<App me={ME} onSignOut={vi.fn()} />);
   const button = await mic();
   const clock = vi.spyOn(Date, "now").mockReturnValue(0);
   fireEvent.pointerDown(button);
@@ -109,10 +99,8 @@ it("sends what it heard and opens the claim it is told to", async () => {
     await within(captions).findByText("open claim ten twenty four"),
   ).toBeDefined();
   expect(await within(captions).findByText("CLM-1024")).toBeDefined();
-  expect(
-    calls.find((c) => c.key === "POST /api/voice/turn")?.body,
-  ).toMatchObject({
-    handler_id: "HND-01",
+  expect(calls.find((c) => c.key === "POST /api/voice/turn")?.body).toEqual({
+    session_id: expect.any(String) as string,
     text: "open claim ten twenty four",
   });
   expect(
@@ -123,7 +111,7 @@ it("sends what it heard and opens the claim it is told to", async () => {
 
 it("highlights a sign-off but never signs off by itself", async () => {
   const calls = setup({ type: "focus_signoff", claim_id: "CLM-1011" });
-  render(<App />);
+  render(<App me={ME} onSignOut={vi.fn()} />);
   fireEvent.change(
     await screen.findByRole("textbox", { name: "Type instead" }),
     {
@@ -142,7 +130,7 @@ it("highlights a sign-off but never signs off by itself", async () => {
 
 it("talks while V is held and stops speech on Escape or a new turn", async () => {
   const calls = setup({ type: "none", claim_id: "" });
-  render(<App />);
+  render(<App me={ME} onSignOut={vi.fn()} />);
   await mic();
   fireEvent.keyDown(window, { key: "v" });
   expect(screen.getByText("Listening")).toBeDefined();
@@ -159,7 +147,7 @@ it("talks while V is held and stops speech on Escape or a new turn", async () =>
 
 it("has no mic when voice is off", async () => {
   setup({ type: "none", claim_id: "" }, false);
-  render(<App />);
+  render(<App me={ME} onSignOut={vi.fn()} />);
   await screen.findByRole("button", { name: /CLM-1024/ });
   expect(screen.queryByRole("button", { name: /Hold to talk/ })).toBeNull();
   expect(screen.queryByRole("region", { name: "Voice assistant" })).toBeNull();
@@ -168,7 +156,7 @@ it("has no mic when voice is off", async () => {
 it("asks for consent once", async () => {
   localStorage.clear();
   setup({ type: "none", claim_id: "" });
-  render(<App />);
+  render(<App me={ME} onSignOut={vi.fn()} />);
   fireEvent.pointerDown(await mic());
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(screen.queryByRole("dialog")).toBeNull();
@@ -181,10 +169,9 @@ it("shows refusals in the captions and hides the panel", async () => {
   stubApi({
     "GET /api/claims": [],
     "GET /api/voice/config": { enabled: true, provider: "stub" },
-    "GET /api/handlers": HANDLERS,
     "POST /api/voice/turn": new Error("Too many requests."),
   });
-  render(<App />);
+  render(<App me={ME} onSignOut={vi.fn()} />);
   const input = await screen.findByRole("textbox", { name: "Type instead" });
   fireEvent.change(input, { target: { value: "hello" } });
   fireEvent.click(screen.getByRole("button", { name: "Send" }));

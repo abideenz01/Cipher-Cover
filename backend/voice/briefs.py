@@ -96,11 +96,15 @@ def speak_claim_id(claim_id: str) -> str:
     return "claim " + " ".join(DIGITS[int(d)] for d in claim_id if d.isdigit())
 
 
-def claim_brief(conn: sqlite3.Connection, claim_id: str) -> dict[str, Any]:
-    """Return the facts of one claim."""
-    row = store.claim_row(conn, claim_id)
+def claim_brief(
+    conn: sqlite3.Connection, claim_id: str, tenant_id: str
+) -> dict[str, Any]:
+    """Return the facts of one of the tenant's claims."""
+    row = store.claim_row(conn, claim_id, tenant_id)
     data = json.loads(row["data"])
-    customer = store.short_name(store.customer_name(conn, row["customer_id"]))
+    customer = store.short_name(
+        store.customer_name(conn, row["customer_id"], tenant_id)
+    )
     kind = data["claim_type"].replace("_", " ")
     state = STATES[row["state"]]
     amount = data["amount_claimed"]
@@ -120,9 +124,11 @@ def claim_brief(conn: sqlite3.Connection, claim_id: str) -> dict[str, Any]:
     }
 
 
-def decision_brief(conn: sqlite3.Connection, claim_id: str) -> dict[str, Any]:
+def decision_brief(
+    conn: sqlite3.Connection, claim_id: str, tenant_id: str
+) -> dict[str, Any]:
     """Return a claim's latest decision."""
-    row = store.claim_row(conn, claim_id)
+    row = store.claim_row(conn, claim_id, tenant_id)
     latest = store.latest_decision(conn, claim_id)
     spoken = speak_claim_id(claim_id).capitalize()
     if latest is None:
@@ -153,9 +159,11 @@ def decision_brief(conn: sqlite3.Connection, claim_id: str) -> dict[str, Any]:
     }
 
 
-def run_status_brief(conn: sqlite3.Connection, claim_id: str) -> dict[str, Any]:
+def run_status_brief(
+    conn: sqlite3.Connection, claim_id: str, tenant_id: str
+) -> dict[str, Any]:
     """Return the outcome of a claim's latest run."""
-    row = store.claim_row(conn, claim_id)
+    row = store.claim_row(conn, claim_id, tenant_id)
     run = conn.execute(
         "SELECT * FROM runs WHERE claim_id = ? ORDER BY started_at DESC LIMIT 1",
         (claim_id,),
@@ -179,15 +187,19 @@ def run_status_brief(conn: sqlite3.Connection, claim_id: str) -> dict[str, Any]:
     }
 
 
-def analytics_brief(conn: sqlite3.Connection) -> dict[str, Any]:
-    """Return the number of claims in each state and the total paid."""
+def analytics_brief(conn: sqlite3.Connection, tenant_id: str) -> dict[str, Any]:
+    """Return the number of the tenant's claims in each state and the total paid."""
     counts = dict.fromkeys(STATES, 0)
-    for row in conn.execute("SELECT state, COUNT(*) AS n FROM claims GROUP BY state"):
+    for row in conn.execute(
+        "SELECT state, COUNT(*) AS n FROM claims WHERE tenant_id = ? GROUP BY state",
+        (tenant_id,),
+    ):
         counts[row["state"]] = row["n"]
     paid = db.dollars(
-        conn.execute("SELECT COALESCE(SUM(amount_cents), 0) FROM payments").fetchone()[
-            0
-        ]
+        conn.execute(
+            "SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchone()[0]
     )
     parts = [f"{counts[s]} {STATES[s]}" for s in STATES]
     return {

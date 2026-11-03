@@ -25,10 +25,16 @@ The data behind UnderCover Travel Insurance, a fictional insurer. Everything her
 - `evals/held_out_claims.json` and `evals/held_out_decisions.json`: twenty-five more claims with their decisions, for checking that an improvement generalizes.
 - `evals/harder/` and `evals/even_harder/`: two further sets with the same file layout. The even harder set depends on `knowledge.json`.
 
+`evals/MANIFEST.json` records each set's version, n, provenance and file hashes. The evaluation (`evals/` at the repo root) refuses a set that no longer matches it. After changing a set, bump the version and rebuild the manifest (see `docs/EVALUATION.md`).
+
 Every decision carries a few tags. `difficulty` is `routine`, `hard` or `manual`. `tempts` names the wrong answer a model is likely to give. `needs` lists what the claim depends on beyond the wording. `tiny` marks a small subset for quick runs.
 
 A decision is scored on two things: the decision itself and the payout. A valid claim that pays more than $1,000 is still an approve. The payment waits for a handler's sign-off, and `over_approval_limit` marks those claims.
 - `evals/voice_scenarios.json`: 19 spoken requests with the tool calls, replies and screen actions expected. The voice agent must never see it.
+
+## A second insurer
+
+- `tenants/acme/`: Acme Travel Cover, a second fictional insurer, seeded as tenant `T-ACME` so that tenant isolation can be shown and tested. It has its own `tenant.json` and `company.json` (a $750.00 sign-off limit and an 8 hour SLA), plus 8 customers, 10 policies, 3 handlers and 10 claims (CLM-5001 to CLM-5010). It shares the plans and the policy wording. Its claims have no labelled decisions and are not part of any evaluation set.
 
 ## The security claims
 

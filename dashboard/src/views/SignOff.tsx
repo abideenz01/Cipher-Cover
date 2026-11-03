@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Handler, type SignOffItem } from "../api";
+import { api, type Me, type SignOffItem } from "../api";
 import { money, waited } from "../format";
 
 export interface Highlight {
@@ -9,23 +9,21 @@ export interface Highlight {
 
 function Row({
   item,
-  handlers,
+  me,
   now,
   confirmAs,
   onOpen,
   onChanged,
 }: Readonly<{
   item: SignOffItem;
-  handlers: Handler[];
+  me: Me;
   now: Date;
   confirmAs: string;
   onOpen: (claimId: string) => void;
   onChanged: () => void;
 }>) {
-  const [handlerId, setHandlerId] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
-  const handler = handlers.find((h) => h.handler_id === handlerId);
   const confirm = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -65,38 +63,24 @@ function Row({
         </span>
       </div>
       <div className="signoff-actions">
-        {confirmAs && (
+        {confirmAs && me.can_sign_off && (
           <button
             ref={confirm}
             type="button"
             className="button primary"
             onClick={() => {
-              act(api.signOff(item.claim_id, confirmAs));
+              act(api.signOff(item.claim_id));
             }}
           >
             Confirm sign-off as {confirmAs}
           </button>
         )}
-        <select
-          aria-label={`Handler for ${item.claim_id}`}
-          value={handlerId}
-          onChange={(event) => {
-            setHandlerId(event.target.value);
-          }}
-        >
-          <option value="">Choose a handler</option>
-          {handlers.map((h) => (
-            <option key={h.handler_id} value={h.handler_id}>
-              {h.handler_id} {h.name}
-            </option>
-          ))}
-        </select>
         <button
           type="button"
           className="button primary"
-          disabled={!handler?.can_approve_over_limit}
+          disabled={!me.can_sign_off}
           onClick={() => {
-            act(api.signOff(item.claim_id, handlerId));
+            act(api.signOff(item.claim_id));
           }}
         >
           Sign off
@@ -112,16 +96,16 @@ function Row({
         <button
           type="button"
           className="button"
-          disabled={!handler || !reason.trim()}
+          disabled={!me.handler_id || !reason.trim()}
           onClick={() => {
-            act(api.sendBack(item.claim_id, handlerId, reason.trim()));
+            act(api.sendBack(item.claim_id, reason.trim()));
           }}
         >
           Send back
         </button>
-        {handler && !handler.can_approve_over_limit && (
+        {!me.can_sign_off && (
           <span className="muted">
-            {handler.name} cannot sign off payouts over $1,000.00.
+            {me.name} cannot sign off payouts over $1,000.00.
           </span>
         )}
         {error && <span className="error">{error}</span>}
@@ -131,12 +115,14 @@ function Row({
 }
 
 export function SignOff({
+  me,
   version,
   now,
   highlight,
   onOpen,
   onChanged,
 }: Readonly<{
+  me: Me;
   version: string;
   now: Date;
   highlight: Highlight | null;
@@ -144,11 +130,6 @@ export function SignOff({
   onChanged: () => void;
 }>) {
   const [items, setItems] = useState<SignOffItem[]>([]);
-  const [handlers, setHandlers] = useState<Handler[]>([]);
-
-  useEffect(() => {
-    void api.listHandlers().then(setHandlers);
-  }, []);
 
   useEffect(() => {
     void api.listSignoffs().then(setItems);
@@ -166,7 +147,7 @@ export function SignOff({
             <Row
               key={item.claim_id}
               item={item}
-              handlers={handlers}
+              me={me}
               now={now}
               confirmAs={
                 item.claim_id === highlight?.claimId ? highlight.handlerId : ""

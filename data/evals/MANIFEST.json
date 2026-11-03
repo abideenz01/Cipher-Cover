@@ -1,0 +1,62 @@
+{
+  "queue": {
+    "version": "2026.11",
+    "provenance": "synthetic",
+    "labeller": "One handler's decision per claim (HND-01, HND-02 or HND-03); no second rater, no adjudication. Written as a benchmark, not taken from production claims.",
+    "n": 35,
+    "files": {
+      "claims.json": "cbc11ab7e134163a6742cd2f3e861313a4067f4b54e327dc5c9dde87670c1cfe",
+      "customers.json": "441000fab7b5e8c422ae91de1affb840b8991d21de7464ca57f7f2d3bfaf3a13",
+      "evals/decisions.json": "eb0313aafc5a98d3cc9b344544d8f28ea71d54e500f58b8ac921fc4f3e1b2f28",
+      "policies.json": "ab468d58846699e05a8cf59ef7ad20ee7b9df494696f9829695ec1ed2f685b6f"
+    }
+  },
+  "held_out": {
+    "version": "2026.11",
+    "provenance": "synthetic",
+    "labeller": "One handler's decision per claim (HND-01, HND-02 or HND-03); no second rater, no adjudication. Written as a benchmark, not taken from production claims.",
+    "n": 25,
+    "files": {
+      "customers.json": "441000fab7b5e8c422ae91de1affb840b8991d21de7464ca57f7f2d3bfaf3a13",
+      "evals/held_out_claims.json": "ea81f7c9eabdd5c7f104c68810569637d037d7cfd586a793c7356f061287b0c8",
+      "evals/held_out_decisions.json": "b5cf94ad28e78b996202b90253415ec434ad6ca4f806747bab89899180c7e559",
+      "policies.json": "ab468d58846699e05a8cf59ef7ad20ee7b9df494696f9829695ec1ed2f685b6f"
+    }
+  },
+  "harder": {
+    "version": "2026.11",
+    "provenance": "synthetic",
+    "labeller": "One handler's decision per claim (HND-01, HND-02 or HND-03); no second rater, no adjudication. Written as a benchmark, not taken from production claims.",
+    "n": 25,
+    "files": {
+      "evals/harder/claims.json": "5f5380c60533d65f4796610fa3214e5a6cc58bcb9d3e8417a1243f1a0c6a4420",
+      "evals/harder/customers.json": "a5a98872b18a5a2f6795bb4e199d8136f5102c0decf98beb5316ac72cd09678a",
+      "evals/harder/decisions.json": "f7e9526ccdfe7a1fa93cfc79f3dd6e9a1b95690c3f22883907228b34b0d919c2",
+      "evals/harder/policies.json": "41d807a840de3cdd44b30a9019ab17c74cdc0ca58b1ca9473a3c97bdd483ef46"
+    }
+  },
+  "even_harder": {
+    "version": "2026.11",
+    "provenance": "synthetic",
+    "labeller": "One handler's decision per claim (HND-01, HND-02 or HND-03); no second rater, no adjudication. Written as a benchmark, not taken from production claims.",
+    "n": 25,
+    "files": {
+      "evals/even_harder/claims.json": "1509501b292fd8edd27a224ebbf70759699f767273a53e18ff451e2cb124535a",
+      "evals/even_harder/customers.json": "310986bd24770c57a94badaa0524487652621831fbbf056ae341cbdb32329350",
+      "evals/even_harder/decisions.json": "3e4edc14afa686a7e745b8bb60fef7df71a94e8625c273d8240b069bebcad5b5",
+      "evals/even_harder/policies.json": "5715f1e6d8b863663d03086a780a2a70bc9bc0e836f563d5bd759aad37f28471"
+    }
+  },
+  "security": {
+    "version": "2026.11",
+    "provenance": "synthetic",
+    "labeller": "One handler's decision per claim (HND-01, HND-02 or HND-03); no second rater, no adjudication. Written as a benchmark, not taken from production claims.",
+    "n": 3,
+    "files": {
+      "security/claims.json": "99faa2194e766dbd68b4629db99f905cc74a3152390f6f8a801e98e98f1d79f3",
+      "security/customers.json": "a54fa8b09bed909a7599be34819205661685e88e244927f62bb02b5ee783d127",
+      "security/decisions.json": "8f0c54ea379063868b7353387a5a0af8e292e12ea8bad083e8a50ab4b4f96478",
+      "security/policies.json": "c385d0052cd42853db61946d9e18fb4af0b1ba875fe1510c8a5596963c3e6c39"
+    }
+  }
+}
