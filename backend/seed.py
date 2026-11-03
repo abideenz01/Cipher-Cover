@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from backend import clock, db
+from backend import clock, db, migrations
 
 DATA = Path(__file__).parent.parent / "data"
 
@@ -22,11 +22,11 @@ def load(name: str) -> Any:
 
 
 def seed(reset: bool = False) -> None:
-    """Create the schema and load the records into an empty database."""
+    """Bring the schema up to date and load the records into an empty database."""
     if reset:
         Path(db.path()).unlink(missing_ok=True)
     with db.connect() as conn:
-        conn.executescript(db.SCHEMA)
+        migrations.apply(conn)
         if conn.execute("SELECT COUNT(*) FROM claims").fetchone()[0]:
             return
         for name in ("company", "plans"):
