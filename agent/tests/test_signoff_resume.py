@@ -3,6 +3,7 @@
 import time
 from contextlib import nullcontext
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -160,3 +161,11 @@ def test_the_scripted_model_is_used_by_the_service_only_with_agent_stub(
     service.carry_on(run)
     assert isinstance(models[0], ScriptedModel)
     assert models[1] is None
+
+
+def test_a_backend_that_is_not_up_yet_is_no_error(monkeypatch):
+    def refused(*args):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(main, "call", refused)
+    assert service.carry_on_all() == []

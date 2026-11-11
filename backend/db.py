@@ -241,8 +241,10 @@ def postgres_engine(conninfo: str, search_path: str) -> sa.Engine:
         conninfo.replace("postgresql://", "postgresql+psycopg://", 1),
         pool_size=POOL_SIZE,
         max_overflow=0,
-        pool_pre_ping=True,
-        pool_recycle=300,
+        # No ping before each use: across regions it costs a round trip on
+        # every connection. Connections are recycled before Supavisor would
+        # drop them as idle.
+        pool_recycle=120,
     )
 
     @event.listens_for(made, "connect")

@@ -137,6 +137,19 @@ def signed_off(conn: db.Connection, claim: db.Row) -> Any:  # noqa: ANN401 - a r
     return decisions.signed_off(conn, claim["claim_id"], latest)
 
 
+def unpaid(conn: db.Connection, run_id: str, claim: db.Row) -> bool:
+    """Say whether this run approved the claim, needs no sign-off, and has not paid."""
+    latest = store.latest_decision(conn, claim["claim_id"])
+    return (
+        claim["state"] == "decided"
+        and latest is not None
+        and latest["run_id"] == run_id
+        and latest["decision"] == "approve"
+        and latest["payout_cents"] > 0
+        and not store.paid_cents(conn, claim["claim_id"])
+    )
+
+
 def waiting(conn: db.Connection, run_id: str, claim: db.Row) -> bool:
     """Say whether this run approved the claim and waits for its sign-off."""
     if claim["state"] != "waiting_for_signoff":
@@ -156,8 +169,12 @@ def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> No
         tenant_id = tenant_of(conn, run_id)
         claim = store.claim_row(conn, claim_id, tenant_id)
         held = waiting(conn, run_id, claim) or signed_off(conn, claim) is not None
+        # An approval this run recorded but never paid is still due: it is
+        # carried on and paid, never left behind.
+        due = unpaid(conn, run_id, claim)
         undecided = claim["state"] == "in_progress" and not held
-        status = "paused" if held else "succeeded"
+        status = "paused" if held else "interrupted" if due else "succeeded"
+        held = held or due
         if not error and undecided:
             error = "The agent finished without recording a decision."
         if undecided:

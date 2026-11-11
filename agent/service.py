@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException
 
 from agent import main, tracing
@@ -63,8 +64,12 @@ def key() -> str:
 
 def carry_on_all() -> list[str]:
     """Take every run that is due from the backend and carry each on."""
-    with main.acting(key()):
-        due = main.call("POST", "/api/agent/resumable")
+    try:
+        with main.acting(key()):
+            due = main.call("POST", "/api/agent/resumable")
+    except httpx.HTTPError as error:
+        log.warning("The backend could not be reached: %s", error)
+        return []
     if "error" in due:
         log.warning("The backend refused the agent's service: %s", due["error"])
         return []

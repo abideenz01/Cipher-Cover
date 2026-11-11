@@ -1,5 +1,6 @@
 """The claim agent carries on where it stopped, and nothing happens twice."""
 
+import time
 from contextlib import nullcontext
 
 import pytest
@@ -195,4 +196,47 @@ def test_resuming_twice_does_nothing_the_second_time(monkeypatch):
     restart(monkeypatch)
     runs.resume(run_id, None)
     runs.resume(run_id, None)
+    assert counts("CLM-1001") == [1, 1]
+
+
+def test_a_decision_accepted_at_the_time_limit_is_still_paid(monkeypatch):
+    real = main.call
+
+    def slow_decision(method, path, body=None, params=None):
+        result = real(method, path, body, params)
+        if path.endswith("/decision"):
+            time.sleep(2.5)
+        return result
+
+    monkeypatch.setattr(main, "call", slow_decision)
+    run_id = runs.begin("CLM-1001", sessions.TENANT)
+    with db.connect() as conn:
+        token = runs.claim_token(conn, run_id)
+    with main.acting(token):
+        reply = main.run("CLM-1001", run_id, ScriptedModel(), seconds=2)
+    assert reply == "CLM-1001: approve, $420.00, paid."
+    assert counts("CLM-1001") == [1, 1]
+
+
+def test_an_approval_left_unpaid_by_an_error_stays_due_and_is_paid(monkeypatch):
+    real = main.pay
+    failures = [RuntimeError("The bank was down.")]
+
+    def flaky(claim_id, amount):
+        if failures:
+            raise failures.pop()
+        return real(claim_id, amount)
+
+    monkeypatch.setattr(main, "pay", flaky)
+    run_id = client.post("/api/claims/CLM-1001/runs").json()["run_id"]
+    run = run_row(run_id)
+    assert (run["status"], run["error"]) == ("interrupted", "The bank was down.")
+    claim = client.get("/api/claims/CLM-1001").json()
+    assert (claim["state"], claim["paid"], claim["failed_attempts"]) == (
+        "decided",
+        0,
+        0,
+    )
+    assert runs.carry_on(sessions.TENANT) == [run_id]
+    assert run_row(run_id)["status"] == "succeeded"
     assert counts("CLM-1001") == [1, 1]

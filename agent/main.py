@@ -311,15 +311,20 @@ def stream(
 ) -> Iterator[BaseMessage]:
     """Yield each new message from an agent, failing once past the deadline.
 
-    A claim that stops to wait for a sign-off yields one message saying so.
+    The deadline bounds the work of deciding. Once the backend has accepted a
+    decision the claim is always settled, however late, so an approval is never
+    left unpaid. A claim that stops to wait for a sign-off yields one message
+    saying so.
     """
+    settling = False
     for update in agent.stream(start, config=config, stream_mode="updates", **options):
         for node, data in update.items():
             if node == "__interrupt__":
                 yield AIMessage(WAITING)
                 continue
+            settling = settling or node == "settle" or "decision" in (data or {})
             yield from (data or {}).get("messages", [])
-        if time.monotonic() > deadline:
+        if not settling and time.monotonic() > deadline:
             raise ClaimTimeout("The claim took longer than its time limit.")
 
 
