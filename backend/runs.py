@@ -111,12 +111,26 @@ def record(run_id: str, step: dict[str, Any]) -> None:
         )
 
 
+def waiting(conn: db.Connection, run_id: str, claim: db.Row) -> bool:
+    """Say whether this run approved the claim and waits for its sign-off."""
+    if claim["state"] != "waiting_for_signoff":
+        return False
+    latest = store.latest_decision(conn, claim["claim_id"])
+    return latest is not None and latest["run_id"] == run_id
+
+
 def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> None:
-    """End a run. A run that left its claim undecided has failed."""
+    """End a run. A run that left its claim undecided has failed.
+
+    A run whose claim waits for a sign-off is paused: it carries on, on the same
+    thread, once a handler signs off.
+    """
     with db.connect() as conn:
         auth.revoke(conn, run_id)
         tenant_id = tenant_of(conn, run_id)
-        undecided = store.claim_row(conn, claim_id, tenant_id)["state"] == "in_progress"
+        claim = store.claim_row(conn, claim_id, tenant_id)
+        undecided = claim["state"] == "in_progress"
+        status = "paused" if waiting(conn, run_id, claim) else "succeeded"
         if not error and undecided:
             error = "The agent finished without recording a decision."
         if undecided:
@@ -130,7 +144,7 @@ def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> No
             "UPDATE runs SET status = ?, error = ?, failure = ?, ended_at = ?"
             " WHERE run_id = ?",
             (
-                "failed" if error else "succeeded",
+                "failed" if error else status,
                 error,
                 failure if error else "",
                 clock.stamp(),
@@ -139,16 +153,74 @@ def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> No
         )
 
 
-def work(run_id: str, claim_id: str) -> None:
-    """Run the agent and record how the run ended."""
+def attempt(run_id: str, claim_id: str, go: Callable[[str], None]) -> None:
+    """Work a run under a new token and record how it ended."""
     with db.connect() as conn:
         token = claim_token(conn, run_id)
     try:
-        runner.execute(claim_id, run_id, lambda step: record(run_id, step), token)
+        go(token)
     except Exception as error:  # noqa: BLE001 - a failed run must free its claim
         finish(run_id, claim_id, main.describe(error), main.failure(error))
         return
     finish(run_id, claim_id, "")
+
+
+def work(run_id: str, claim_id: str) -> None:
+    """Run the agent on a new run and record how the run ended."""
+
+    def go(token: str) -> None:
+        runner.execute(claim_id, run_id, lambda step: record(run_id, step), token)
+
+    attempt(run_id, claim_id, go)
+
+
+def reopen(run_id: str) -> str:
+    """Take a paused or interrupted run back to running and return its claim.
+
+    The run is taken in one conditional update, so it can't be resumed twice
+    at once. Returns '' when it is not paused or interrupted.
+    """
+    with db.connect() as conn:
+        taken = conn.execute(
+            "UPDATE runs SET status = 'running', ended_at = ''"
+            " WHERE run_id = ? AND status IN ('paused', 'interrupted')",
+            (run_id,),
+        ).rowcount
+        if not taken:
+            return ""
+        return conn.execute(
+            "SELECT claim_id FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()[0]
+
+
+def resume(run_id: str, signoff: dict[str, Any] | None) -> None:
+    """Carry a run on, on its own thread, with no new attempt.
+
+    With a sign-off it pays the claim it was waiting on; without, it goes on
+    from where it was stopped.
+    """
+    claim_id = reopen(run_id)
+    if not claim_id:
+        return
+
+    def go(token: str) -> None:
+        on_step = lambda step: record(run_id, step)  # noqa: E731 - one line
+        runner.resume(claim_id, run_id, signoff, on_step, token)
+
+    attempt(run_id, claim_id, go)
+
+
+def resume_interrupted(tenant_id: str) -> list[str]:
+    """Carry on every run of a tenant that a restart stopped, oldest first."""
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT run_id FROM runs WHERE status = 'interrupted' AND tenant_id = ?"
+            " ORDER BY seq",
+            (tenant_id,),
+        ).fetchall()
+    for row in rows:
+        resume(row["run_id"], None)
+    return [r["run_id"] for r in rows]
 
 
 def run_view(conn: Any, run_id: str, tenant_id: str) -> dict[str, Any]:

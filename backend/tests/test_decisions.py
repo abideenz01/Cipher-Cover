@@ -110,9 +110,31 @@ def test_under_the_limit_is_paid_once():
     calculate("CLM-1001")
     assert decide("CLM-1001", "approve", 420.0).json()["state"] == "decided"
     assert pay("CLM-1001", 420.0).status_code == 200
-    assert pay("CLM-1001", 420.0).status_code == 409
+    assert pay("CLM-1001", 420.0).json() == {"claim_id": "CLM-1001", "paid": 420.0}
+    assert pay("CLM-1001", 400.0).status_code == 409
     assert client.get("/api/claims/CLM-1001").json()["paid"] == 420.0
     assert decide("CLM-1001", "refer", 0).status_code == 409
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 1
+
+
+def test_a_repeated_decision_counts_as_done():
+    calculate("CLM-1001")
+    first = decide("CLM-1001", "approve", 420.0).json()
+    again = decide("CLM-1001", "approve", 420.0)
+    assert again.status_code == 200
+    assert again.json() == first
+    assert decide("CLM-1001", "decline", 0).status_code == 409
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] == 1
+
+
+def test_a_repeat_from_another_run_is_refused():
+    calculate("CLM-1001")
+    decide("CLM-1001", "approve", 420.0)
+    with db.connect() as conn:
+        conn.execute("UPDATE decisions SET run_id = 'another-run'")
+    assert decide("CLM-1001", "approve", 420.0).status_code == 409
 
 
 def test_pay_only_the_approved_amount():

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from sqlalchemy.pool import QueuePool
 
+from agent import checkpoints
 from backend import db
 
 
@@ -58,7 +59,7 @@ def test_postgres_with_database_url_holds_at_most_four_connections(monkeypatch):
     assert made.dialect.driver == "psycopg"
     pool = made.pool
     assert isinstance(pool, QueuePool)
-    assert pool.size() == db.POOL_SIZE == 4
+    assert pool.size() + checkpoints.CONNECTIONS == 4
     assert pool._max_overflow == 0  # noqa: SLF001 - no public accessor
 
 

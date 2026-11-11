@@ -14,7 +14,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from agent import main
+from agent import checkpoints, main
 from backend import auth, claims, clock, db, runner, runs, store
 
 router = APIRouter(prefix="/api")
@@ -200,6 +200,8 @@ def work(run_id: str) -> None:
         tenant_id = runs.tenant_of(conn, run_id)
         token = auth.issue(conn, tenant_id, "queue", QUEUE_TOKEN_SECONDS, run_id=run_id)
     try:
+        # Finish what a stopped run left, on its own threads, before planning.
+        runs.resume_interrupted(tenant_id)
         runner.execute_queue(run_id, runs.record, token)
     except Exception as error:  # noqa: BLE001 - a failed run must free its claims
         close(run_id, main.describe(error), main.failure(error))
@@ -208,28 +210,55 @@ def work(run_id: str) -> None:
 
 
 def recover() -> None:
-    """On startup, free what a stopped backend left: no run can still be live."""
+    """On startup, deal with what a stopped backend left: no run can still be live.
+
+    When the claim agent's progress is durable (PostgreSQL), a claim run that
+    was working is interrupted: it keeps its claim and its attempt, and the next
+    queue run, or the agent's service, carries it on from its last step. A
+    stopped queue run ends, and the next one finishes its claims. Without
+    durable progress, claims go back to waiting with a failed attempt.
+    """
     message = "The backend restarted."
     with db.connect() as conn:
-        conn.execute(
-            "UPDATE claims SET state = 'waiting', state_since = ?,"
-            " failed_attempts = failed_attempts + 1 WHERE state = 'in_progress'",
-            (clock.stamp(),),
-        )
-        conn.execute(
-            "UPDATE runs SET status = 'failed', failure = 'error', error = ?,"
-            " ended_at = ? WHERE status = 'running'",
-            (message, clock.stamp()),
-        )
-        for row in conn.execute(
-            "SELECT * FROM queue_runs WHERE status IN ('running', 'stopping', 'paused')"
-        ).fetchall():
-            end(conn, row, "failed", "error", message)
+        if checkpoints.durable():
+            interrupt(conn)
+        else:
+            free(conn, message)
         conn.execute(
             "UPDATE service_tokens SET revoked_at = ? WHERE revoked_at = ''"
             " AND kind IN ('claim', 'queue')",
             (clock.stamp(),),
         )
+
+
+def interrupt(conn: db.Connection) -> None:
+    """Keep each working claim run's place, and end the live queue runs."""
+    conn.execute(
+        "UPDATE runs SET status = 'interrupted', ended_at = ? WHERE status = 'running'",
+        (clock.stamp(),),
+    )
+    for row in conn.execute(
+        "SELECT * FROM queue_runs WHERE status IN ('running', 'stopping', 'paused')"
+    ).fetchall():
+        end(conn, row, "stopped", "restart", "")
+
+
+def free(conn: db.Connection, message: str) -> None:
+    """Return working claims to waiting with a failed attempt, and fail the runs."""
+    conn.execute(
+        "UPDATE claims SET state = 'waiting', state_since = ?,"
+        " failed_attempts = failed_attempts + 1 WHERE state = 'in_progress'",
+        (clock.stamp(),),
+    )
+    conn.execute(
+        "UPDATE runs SET status = 'failed', failure = 'error', error = ?,"
+        " ended_at = ? WHERE status = 'running'",
+        (message, clock.stamp()),
+    )
+    for row in conn.execute(
+        "SELECT * FROM queue_runs WHERE status IN ('running', 'stopping', 'paused')"
+    ).fetchall():
+        end(conn, row, "failed", "error", message)
 
 
 def model() -> tuple[str, str]:

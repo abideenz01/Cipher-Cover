@@ -37,14 +37,14 @@ def test_run_decides_the_claim():
     assert calculation["detail"]["claim_id"] == "CLM-1001"
 
 
-def test_run_over_the_limit_waits():
+def test_run_over_the_limit_pauses_for_sign_off():
     run, events = finished("CLM-1011")
-    assert run["status"] == "succeeded"
-    assert client.get("/api/claims/CLM-1011").json()["state"] == "waiting_for_signoff"
-    paid = [
-        e for e in events if e["kind"] == "tool_result" and e["name"] == "pay_claim"
-    ]
-    assert "sign-off" in paid[0]["detail"]["result"]
+    assert run["status"] == "paused"
+    claim = client.get("/api/claims/CLM-1011").json()
+    assert claim["state"] == "waiting_for_signoff"
+    assert claim["paid"] == 0
+    assert events[-1]["detail"] == {"text": "Waiting for a handler's sign-off."}
+    assert "pay_claim" not in [e["name"] for e in events]
 
 
 def test_one_run_at_a_time(monkeypatch):

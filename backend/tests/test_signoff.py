@@ -52,8 +52,10 @@ def test_sign_off_pays(waiting, user_id):
     assert claim["paid"] == 1500.0
     assert client.get("/api/signoffs").json() == []
     response = pay("CLM-1011", 1500.0)
-    assert response.status_code == 409
-    assert response.json()["detail"] == "This claim is already paid."
+    assert response.status_code == 200
+    assert response.json()["paid"] == 1500.0
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 1
     with db.connect() as conn:
         signed = conn.execute("SELECT handler_id FROM signoffs").fetchone()
     assert signed["handler_id"] == user_id.replace("USR", "HND")

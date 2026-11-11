@@ -1,8 +1,9 @@
 """Scripted models for tests and end-to-end runs. They never call a real model.
 
 ScriptedModel reads the claim, the policy, the history and section 10 of the
-wording, pays every item claimed, approves and pays. Its decisions are not meant
-to be right. FaultyModel adds the failures a long run meets.
+wording, and approves every item claimed; the graph then pays the approval. Its
+decisions are not meant to be right. FaultyModel adds the failures a long run
+meets.
 """
 
 import json
@@ -59,7 +60,7 @@ def line(claim_type: str, item: dict[str, Any]) -> dict[str, Any]:
 
 
 class ScriptedModel(BaseChatModel):
-    """Approve and pay every claim, with every item as a line."""
+    """Approve every claim, with every item as a line."""
 
     prompts: list[list[BaseMessage]] = Field(default_factory=list)
 
@@ -119,13 +120,9 @@ class ScriptedModel(BaseChatModel):
                         "sections": self.sections(messages),
                     },
                 ),
-                "record_decision": (
-                    "pay_claim",
-                    {"claim_id": claim_id, "amount": payout},
-                ),
             }
-        if done == "pay_claim":
-            return reply(f"Approved {claim_id}.", [], len(messages))
+        if done == "record_decision":
+            return reply(f"Could not decide {claim_id}.", [], len(messages))
         return reply("", [script[done]], len(messages))
 
 

@@ -2,9 +2,9 @@
 
 Every query is written once, with `?` placeholders, and runs on both through
 SQLAlchemy Core. On PostgreSQL all tables live in one schema (`undercover`, or
-DATABASE_SCHEMA), set as the search path on each connection, and each process
-holds at most four connections, because Supabase's session pooler allows 15 in
-all.
+DATABASE_SCHEMA), set as the search path on each connection. Each process holds
+at most four connections, because Supabase's session pooler allows 15 in all:
+three here and one for the claim agent's checkpointer (agent/checkpoints.py).
 
 On PostgreSQL, a connection opened while serving a signed-in request works as
 the application role, under row-level security for the caller's tenant
@@ -26,7 +26,7 @@ from sqlalchemy import event
 from sqlalchemy.pool import NullPool
 
 APP_ROLE = "undercover_app"
-POOL_SIZE = 4
+POOL_SIZE = 3
 
 # The tenant of the signed-in caller of the request being served, set by
 # auth.scope. Empty outside a request.

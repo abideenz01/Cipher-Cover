@@ -291,6 +291,31 @@ describe("the drawer", () => {
     expect(screen.getByText(/Waiting for a handler's sign-off/)).toBeDefined();
   });
 
+  it("says when an attempt waits for sign-off or carries on next run", async () => {
+    const held = claim({
+      runs: [
+        run({ run_id: "r1", status: "interrupted" }),
+        run({ run_id: "r2", attempt: 2, status: "paused" }),
+      ],
+    });
+    stubApi({
+      "GET /api/claims": [held],
+      "GET /api/claims/CLM-1002": held,
+      "GET /api/policies/POL-2002": POLICY,
+      "GET /api/runs/r1": run({ status: "interrupted" }),
+      "GET /api/runs/r1/events": [],
+      "GET /api/runs/r2": run({ run_id: "r2", status: "paused" }),
+      "GET /api/runs/r2/events": [],
+    });
+    render(<App me={ME} onSignOut={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /CLM-1002/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Trace" }));
+    expect(
+      screen.getByText("Attempt 1 · stopped; carries on next run"),
+    ).toBeDefined();
+    expect(screen.getByText("Attempt 2 · waiting for sign-off")).toBeDefined();
+  });
+
   it("groups the trace by attempt with the sections each read", async () => {
     const tried = claim({
       runs: [

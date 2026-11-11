@@ -1,6 +1,12 @@
-"""The UnderCover Agent: the claim agent, which works one claim."""
+"""The UnderCover Agent: the claim agent, which works one claim.
+
+The claim agent is the graph in agent/graph.py. Its progress is saved after
+every step (agent/checkpoints.py), so run() starts a claim and resume() carries
+one on: after a stop, or with the sign-off it was waiting for.
+"""
 
 import os
+import random
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -10,21 +16,17 @@ from typing import Any, Literal
 import httpx
 import openai
 from dotenv import load_dotenv
-from langchain.agents import create_agent
-from langchain.agents.middleware import (
-    AgentMiddleware,
-    ModelCallLimitMiddleware,
-    ModelRetryMiddleware,
-)
+from langchain.agents.middleware import ModelRetryMiddleware
 from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_config
+from langgraph.types import Command
 from pydantic import BaseModel, Field, SecretStr
 
-from agent import tracing
+from agent import checkpoints, graph, tracing
 
 
 def load_settings(path: str | None = None) -> None:
@@ -43,6 +45,7 @@ BACKEND_URL = "http://127.0.0.1:8000"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
 RETRY_DELAY = 1.0
+MODEL_RETRIES = 3
 PROVIDER_ERRORS = (
     openai.APITimeoutError,
     openai.APIConnectionError,
@@ -51,6 +54,7 @@ PROVIDER_ERRORS = (
 )
 
 Step = dict[str, Any]
+WAITING = "Waiting for a handler's sign-off."
 
 # The service token the backend issued for the run in hand. Every call to the
 # backend sends it, and the backend allows only what that run may do.
@@ -146,7 +150,7 @@ def failure(error: Exception) -> str:
     """Sort a failed claim run into provider, step_limit, time_limit or error."""
     if isinstance(error, PROVIDER_ERRORS):
         return "provider"
-    if isinstance(error, ModelCallLimitExceededError):
+    if isinstance(error, ModelCallLimitExceededError | graph.StepLimit):
         return "step_limit"
     if isinstance(error, ClaimTimeout):
         return "time_limit"
@@ -158,10 +162,22 @@ def describe(error: Exception) -> str:
     return str(error) or type(error).__name__
 
 
+def retrying(invoke: Callable[[], BaseMessage]) -> BaseMessage:
+    """Call the model, retrying provider errors three times, waiting longer each."""
+    for attempt in range(MODEL_RETRIES + 1):
+        try:
+            return invoke()
+        except PROVIDER_ERRORS:
+            if attempt == MODEL_RETRIES:
+                raise
+            time.sleep(RETRY_DELAY * 2**attempt * random.uniform(1, 1.5))  # noqa: S311 - jitter, not secrets
+    raise AssertionError  # unreachable: the last attempt returns or raises
+
+
 def retries() -> ModelRetryMiddleware:
     """Retry provider errors three times, waiting longer each time."""
     return ModelRetryMiddleware(
-        max_retries=3,
+        max_retries=MODEL_RETRIES,
         retry_on=PROVIDER_ERRORS,
         on_failure="error",
         initial_delay=RETRY_DELAY,
@@ -232,9 +248,8 @@ def record_decision(
     return call("POST", f"/api/claims/{claim_id}/decision", body)
 
 
-@tool
-def pay_claim(claim_id: str, amount: float) -> Any:
-    """Pay an approved claim. Over $1,000.00 it waits for a handler's sign-off."""
+def pay(claim_id: str, amount: float) -> Any:
+    """Pay an approved claim: the graph's pay step, not a tool of the model's."""
     body = {"run_id": run_id(), "amount": amount}
     return call("POST", f"/api/claims/{claim_id}/pay", body)
 
@@ -247,7 +262,6 @@ TOOLS = [
     read_section,
     calculate_payout,
     record_decision,
-    pay_claim,
 ]
 
 
@@ -293,15 +307,17 @@ def steps(message: BaseMessage) -> list[Step]:
 
 
 def stream(
-    agent: Any, prompt: str, config: dict[str, Any], deadline: float
+    agent: Any, start: Any, config: dict[str, Any], deadline: float, **options: Any
 ) -> Iterator[BaseMessage]:
-    """Yield each new message from an agent, failing once past the deadline."""
-    for update in agent.stream(
-        {"messages": [{"role": "user", "content": prompt}]},
-        config=config,
-        stream_mode="updates",
-    ):
-        for data in update.values():
+    """Yield each new message from an agent, failing once past the deadline.
+
+    A claim that stops to wait for a sign-off yields one message saying so.
+    """
+    for update in agent.stream(start, config=config, stream_mode="updates", **options):
+        for node, data in update.items():
+            if node == "__interrupt__":
+                yield AIMessage(WAITING)
+                continue
             yield from (data or {}).get("messages", [])
         if time.monotonic() > deadline:
             raise ClaimTimeout("The claim took longer than its time limit.")
@@ -313,12 +329,50 @@ def report(
     """Pass a message's steps, and a model reply's usage, to on_step."""
     if not on_step:
         return
-    if isinstance(message, AIMessage):
+    if isinstance(message, AIMessage) and message.text != WAITING:
         on_step(
             {"kind": "usage", "name": label(llm), "detail": {"tokens": tokens(message)}}
         )
     for step in steps(message):
         on_step(step)
+
+
+def claim_graph(llm: BaseChatModel) -> Any:  # noqa: ANN401 - a compiled graph
+    """Build the claim agent's graph on this model, with today's instructions."""
+    return graph.build(
+        llm,
+        TOOLS,
+        call("GET", "/api/instructions")["claim"],
+        limit=setting("CLAIM_STEP_LIMIT", 30),
+        retry=retrying,
+        pay=pay,
+        checkpointer=checkpoints.saver(),
+    )
+
+
+def work(  # noqa: PLR0913, PLR0917 - the claim, its thread and how to work it
+    claim_id: str,
+    thread_id: str,
+    start: Any,  # noqa: ANN401 - fresh state, None or a Command
+    llm: BaseChatModel | None,
+    on_step: Callable[[Step], None] | None,
+    seconds: float,
+) -> str:
+    """Work a claim's graph from start and return its final reply."""
+    llm = llm or model()
+    agent = claim_graph(llm)
+    config = {
+        "configurable": {"thread_id": thread_id, "model": label(llm)},
+        **tracing.config(tracing.session(claim_id, thread_id), f"claim {claim_id}"),
+    }
+    if start is None and not agent.get_state(config).values:
+        start = graph.start(claim_id)
+    reply = ""
+    deadline = time.monotonic() + seconds
+    for message in stream(agent, start, config, deadline, durability="sync"):
+        report(llm, message, on_step)
+        reply = message.text
+    return agent.get_state(config).values.get("reply") or reply
 
 
 def run(
@@ -332,27 +386,21 @@ def run(
 
     Call it inside acting(token) with the run's token, or the backend refuses.
     """
-    llm = llm or model()
-    middleware: list[AgentMiddleware[Any, Any, Any]] = [
-        retries(),
-        ModelCallLimitMiddleware(
-            run_limit=setting("CLAIM_STEP_LIMIT", 30), exit_behavior="error"
-        ),
-    ]
-    agent = create_agent(
-        llm,
-        tools=TOOLS,
-        system_prompt=call("GET", "/api/instructions")["claim"],
-        middleware=middleware,
-    )
-    config = {
-        "configurable": {"thread_id": thread_id, "model": label(llm)},
-        **tracing.config(tracing.session(claim_id, thread_id), f"claim {claim_id}"),
-    }
-    reply = ""
-    for message in stream(
-        agent, f"Claim {claim_id}", config, time.monotonic() + seconds
-    ):
-        report(llm, message, on_step)
-        reply = message.text
-    return reply
+    return work(claim_id, thread_id, graph.start(claim_id), llm, on_step, seconds)
+
+
+def resume(  # noqa: PLR0913, PLR0917 - run()'s arguments and the sign-off
+    claim_id: str,
+    thread_id: str,
+    signoff: dict[str, Any] | None,
+    llm: BaseChatModel | None = None,
+    on_step: Callable[[Step], None] | None = None,
+    seconds: float = 120,
+) -> str:
+    """Carry a claim on from its last saved step, on the same thread.
+
+    With a sign-off it goes on from where it waited for one; without, from where
+    it was stopped. A claim stopped before its first step starts afresh.
+    """
+    start = Command(resume=signoff) if signoff is not None else None
+    return work(claim_id, thread_id, start, llm, on_step, seconds)

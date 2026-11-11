@@ -12,8 +12,9 @@ from contextlib import nullcontext
 import pytest
 from sqlalchemy import exc
 
-from agent import main, tracing
-from backend import auth, db, runs, seed
+from agent import checkpoints, main, tracing
+from agent.tests.test_durable import Stopped, StopsAt
+from backend import auth, db, queue_runs, runs, seed
 from backend.tests import sessions, tenants
 
 pytestmark = [
@@ -41,7 +42,15 @@ def postgres():
         seed.seed(reset=True)
         sessions.install()
         yield
+        close_checkpointer()
         seed.clear()
+
+
+def close_checkpointer():
+    """Close the checkpointer's connection, as a process that ends would."""
+    if checkpoints.postgres.cache_info().currsize:
+        checkpoints.saver().conn.close()  # pyright: ignore[reportAttributeAccessIssue]
+        checkpoints.postgres.cache_clear()
 
 
 @pytest.fixture
@@ -133,3 +142,30 @@ def test_even_the_owner_cannot_insert_without_a_tenant():
             "INSERT INTO sendbacks (claim_id, handler_id, reason, created_at)"
             " VALUES ('CLM-5001', 'HND-A1', 'x', 'now')"
         )
+
+
+def test_a_stopped_claim_carries_on_from_supabase_in_a_new_process(monkeypatch):
+    client = sessions.client()
+    monkeypatch.setattr(main, "backend", lambda: nullcontext(client))
+    run_id = runs.begin("CLM-1004", sessions.TENANT)
+    with db.connect() as conn:
+        token = runs.claim_token(conn, run_id)
+    with pytest.raises(Stopped), main.acting(token):
+        main.run("CLM-1004", run_id, StopsAt(at=4))
+    close_checkpointer()
+    queue_runs.recover()
+    assert client.get(f"/api/runs/{run_id}").json()["status"] == "interrupted"
+    assert runs.resume_interrupted(sessions.TENANT) == [run_id]
+    run = client.get(f"/api/runs/{run_id}").json()
+    claim = client.get("/api/claims/CLM-1004").json()
+    assert (run["status"], run["attempt"]) == ("succeeded", 1)
+    assert (claim["state"], claim["failed_attempts"]) == ("decided", 0)
+    with db.connect() as conn:
+        saved = conn.execute(
+            "SELECT COUNT(*) FROM checkpoints WHERE thread_id = ?", (run_id,)
+        ).fetchone()[0]
+        decisions = conn.execute(
+            "SELECT COUNT(*) FROM decisions WHERE claim_id = 'CLM-1004'"
+        ).fetchone()[0]
+    assert saved > 0
+    assert decisions == 1

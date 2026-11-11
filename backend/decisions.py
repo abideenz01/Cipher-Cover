@@ -67,6 +67,31 @@ def cited(conn: db.Connection, run_id: str, ids: list[str]) -> str:
     return "; ".join(sections.title(s) for s in ids)
 
 
+def repeated(conn: db.Connection, claim_id: str, body: Decision) -> bool:
+    """Say whether this run already recorded this decision and payout.
+
+    A claim agent that carries on after a restart may record its decision again;
+    that counts as done. A different decision is still refused.
+    """
+    latest = store.latest_decision(conn, claim_id)
+    return (
+        latest is not None
+        and latest["run_id"] == body.run_id
+        and latest["decision"] == body.decision
+        and latest["payout_cents"] == db.cents(body.payout)
+    )
+
+
+def signed_off(conn: db.Connection, claim_id: str, decision: db.Row) -> bool:
+    """Say whether a handler signed off this decision's payout."""
+    row = conn.execute(
+        "SELECT 1 FROM signoffs WHERE claim_id = ? AND amount_cents = ?"
+        " AND created_at >= ?",
+        (claim_id, decision["payout_cents"], decision["created_at"]),
+    ).fetchone()
+    return row is not None
+
+
 def pay(conn: db.Connection, tenant_id: str, claim_id: str, amount_cents: int) -> None:
     """Record a payment. No money leaves the system."""
     conn.execute(
@@ -102,7 +127,10 @@ def record_decision(claim_id: str, body: Decision, who: auth.Who) -> dict[str, A
     """Store the agent's decision on a claim."""
     with db.connect() as conn:
         holds(conn, who, body.run_id, claim_id)
-        if store.claim_row(conn, claim_id, who.tenant_id)["state"] != "in_progress":
+        state = store.claim_row(conn, claim_id, who.tenant_id)["state"]
+        if state != "in_progress":
+            if repeated(conn, claim_id, body):
+                return {"claim_id": claim_id, "state": state, "decision": body.decision}
             raise HTTPException(409, f"Claim {claim_id} is already decided.")
         if not body.reason.strip():
             raise HTTPException(409, "The reason is missing.")
@@ -150,7 +178,7 @@ def record_decision(claim_id: str, body: Decision, who: auth.Who) -> dict[str, A
 
 @router.post("/claims/{claim_id}/pay", operation_id="pay_claim")
 def pay_claim(claim_id: str, body: Payment, who: auth.Who) -> dict[str, Any]:
-    """Pay an amount, blocked until a handler signs off when over the limit."""
+    """Pay the approved amount; over the limit, only after a handler's sign-off."""
     with db.connect() as conn:
         holds(conn, who, body.run_id, claim_id)
         latest = store.latest_decision(conn, claim_id)
@@ -159,9 +187,12 @@ def pay_claim(claim_id: str, body: Payment, who: auth.Who) -> dict[str, Any]:
             raise HTTPException(409, "Only an approved claim can be paid.")
         if latest["payout_cents"] != amount:
             raise HTTPException(409, "The amount must match the approved payout.")
-        if store.paid_cents(conn, claim_id):
+        if paid := store.paid_cents(conn, claim_id):
+            if paid == amount:
+                return {"claim_id": claim_id, "paid": db.dollars(amount)}
             raise HTTPException(409, "This claim is already paid.")
-        if amount > limit_cents(conn, who.tenant_id):
+        over = amount > limit_cents(conn, who.tenant_id)
+        if over and not signed_off(conn, claim_id, latest):
             raise HTTPException(409, "Waiting for a handler's sign-off.")
         pay(conn, who.tenant_id, claim_id, amount)
     return {"claim_id": claim_id, "paid": db.dollars(amount)}

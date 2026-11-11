@@ -11,7 +11,8 @@ Outcome = dict[str, Any]
 Check = Callable[[Label, Outcome], bool]
 
 CHECKS: dict[str, Check] = {
-    "run_succeeded": lambda _, o: o["status"] == "succeeded",
+    # A run that waits for a sign-off has done all its own work.
+    "run_succeeded": lambda _, o: o["status"] in {"succeeded", "paused"},
     "decision_correct": lambda label, o: o["decision"] == label.decision,
     "payout_exact": lambda label, o: o["payout_cents"] == label.payout_cents,
     "decision_and_payout": lambda label, o: (

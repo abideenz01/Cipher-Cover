@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { api, type Claim, type Policy, type Run, type Section } from "../api";
-import { count, duration, FAILURE_LABELS, label, money } from "../format";
+import {
+  ATTEMPT_LABELS,
+  count,
+  duration,
+  FAILURE_LABELS,
+  label,
+  money,
+} from "../format";
 import { Ledger } from "./Ledger";
 import { DecisionChip, StateChip } from "./StateChip";
 import { Trace } from "./Timeline";
@@ -98,8 +105,7 @@ function SectionList({
 
 function attemptLabel(run: Run): string {
   const failure = run.failure ? ` (${FAILURE_LABELS[run.failure]})` : "";
-  const status = run.status === "running" ? "running" : run.status;
-  return `Attempt ${String(run.attempt)} · ${status}${failure}`;
+  return `Attempt ${String(run.attempt)} · ${ATTEMPT_LABELS[run.status]}${failure}`;
 }
 
 function Attempts({ runs }: Readonly<{ runs: Run[] }>) {

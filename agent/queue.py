@@ -17,6 +17,7 @@ from agent import main, tracing
 from agent.main import Step, call
 
 OnStep = Callable[[str, Step], None]
+START = {"messages": [{"role": "user", "content": "Work the queue."}]}
 
 
 class Todo(BaseModel):
@@ -136,7 +137,7 @@ def work_queue(
         **tracing.config(f"queue:{run_id}", "queue run"),
     }
     reply = ""
-    for message in main.stream(agent, "Work the queue.", config, float("inf")):
+    for message in main.stream(agent, START, config, float("inf")):
         main.report(llm, message, lambda step: record(run_id, step))
         reply = message.text
     return reply
