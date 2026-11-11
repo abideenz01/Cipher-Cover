@@ -28,7 +28,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 from langchain_core.language_models import BaseChatModel
 
-from agent import main
+from agent import main, tracing
 from agent.stub import ScriptedModel
 from backend import claims, clock, db, runs, seed
 from backend.main import app
@@ -224,6 +224,7 @@ def main_cli(argv: list[str] | None = None) -> dict[str, Any]:
         limit=args.limit,
         medical=args.medical == "on",
     )
+    tracing.flush()
     print(result["report"])
     if args.json:
         Path(args.json).write_text(

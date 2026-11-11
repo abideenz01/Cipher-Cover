@@ -24,6 +24,8 @@ from langchain_openai import ChatOpenAI
 from langgraph.config import get_config
 from pydantic import BaseModel, SecretStr
 
+from agent import tracing
+
 
 def load_settings(path: str | None = None) -> None:
     """Fill settings from .env without replacing ones the process was given.
@@ -323,7 +325,10 @@ def run(
         system_prompt=call("GET", "/api/instructions")["claim"],
         middleware=middleware,
     )
-    config = {"configurable": {"thread_id": thread_id, "model": label(llm)}}
+    config = {
+        "configurable": {"thread_id": thread_id, "model": label(llm)},
+        **tracing.config(tracing.session(claim_id, thread_id), f"claim {claim_id}"),
+    }
     reply = ""
     for message in stream(
         agent, f"Claim {claim_id}", config, time.monotonic() + seconds

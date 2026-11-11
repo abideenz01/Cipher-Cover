@@ -70,6 +70,21 @@ The production upgrade plan is in `docs/PLAN_PRODUCTION.md`.
 - 2026-11-03, Phase 5a: the scripted baseline is fixed and asserted (queue: decisions 20/35, payouts 11/35, an expected section cited 8/35, over-limit approvals waiting 11/11). It checks the harness, not decision quality. The real-model runs that the risk rules need (medical documents off and on) are written out in `docs/EVALUATION.md` but not run. Python 289 passed at 98%, TypeScript 42 at 96.3%, Playwright 16 of 16.
 - Still open, by the risk rules in `docs/PLAN_PRODUCTION.md` section E: the claim instructions don't yet say what to do with a withheld medical document, so the agent may decide the six medical claims differently. Changing the instructions now would move the fingerprint with nothing to measure it against. The 5a tooling can now measure the six claims with the gate on and off (`--medical on|off`), but it needs a real-model run. Startup recovery still frees every tenant's claims, which is correct, because a restart ends every tenant's runs. The plans and the policy wording are still shared by both tenants.
 
+The durable-agent plan is in `docs/PLAN_DURABLE.md` (brief: `docs/DURABLE.md`). Paid model spend for it is capped at $1.50.
+
+| Durable phase | State |
+|---|---|
+| D1 Tracing in Langfuse | Done 2026-11-11. Python 294 passed at 98.2%, TypeScript 42, Playwright 16 of 16 |
+| G1 Real-model baseline | Not started |
+| D2 Payout rules from the manual | Not started |
+| D3 Supabase as the database | Not started |
+| D4 Row-level security | Not started |
+| D5 Durable claim agent | Not started |
+| D6 Agent service and sign-off resume | Not started |
+| D7 Live checks and docs | Not started |
+
+- 2026-11-11, D1: `agent/tracing.py` sends each claim's work to Langfuse when the three `LANGFUSE_*` settings are set, as one session named `<claim_id>:<thread_id>`, a new trace per run; the queue agent's run is the session `queue:<run_id>`. Langfuse gets what the model gets: medical documents stay withheld by the backend, contact details are never returned, and a mask replaces email addresses. Without the settings nothing is sent, which is how the tests run. Checked live: `auth_check()` passed, and one claim on `openrouter/free` (47,808 tokens, $0) appeared as one session with one trace of 65 observations (9 model calls, 14 tool calls). This Langfuse organization cannot use the legacy `GET /api/public/traces`; sessions are read through `GET /api/public/v2/observations`. Spend so far: $0.00.
+
 The harness plan is in `docs/PLAN_HARNESS.md`.
 
 | Harness phase | State |
