@@ -1,7 +1,8 @@
 from typing import Any
 
+from agent import stub
 from backend import db, runs
-from backend.tests import sessions
+from backend.tests import sessions, tenants
 
 client = sessions.client()
 
@@ -33,15 +34,8 @@ def read(claim_id: str, source: str = "wording", number: int = 5) -> None:
 
 def lines(claim_id: str) -> list[dict[str, Any]]:
     """Return every item on a claim as a line to pay."""
-    items = client.get(f"/api/claims/{claim_id}").json()["items"]
-    return [
-        {
-            "description": i["description"],
-            "amount": i["amount"],
-            "electronic": i["category"] == "electronics",
-        }
-        for i in items
-    ]
+    claim = client.get(f"/api/claims/{claim_id}").json()
+    return [stub.line(claim["claim_type"], i) for i in claim["items"]]
 
 
 def calculate(claim_id: str) -> Any:
@@ -202,3 +196,31 @@ def test_a_decision_needs_a_reason():
         "/api/claims/CLM-1002/decision", json=body, headers=agent("CLM-1002")
     )
     assert response.json()["detail"] == "The reason is missing."
+
+
+def expense(amount: float) -> dict[str, Any]:
+    return {
+        "description": "Hospital bill",
+        "amount": amount,
+        "kind": "expense",
+        "quantity": 1,
+        "nights": 0,
+        "hours": 0,
+    }
+
+
+def test_calculation_says_when_the_payout_needs_sign_off():
+    assert calculate("CLM-1001").json()["needs_sign_off"] is False
+    assert calculate("CLM-1011").json()["needs_sign_off"] is True
+
+
+def test_acme_payout_over_its_own_750_limit_needs_sign_off():
+    run_id = runs.begin(tenants.CLAIM_MEDICAL, tenants.ACME)
+    body = {"run_id": run_id, "lines": [expense(900)], "paid_by_others": 0}
+    result = client.post(
+        f"/api/claims/{tenants.CLAIM_MEDICAL}/calculate",
+        json=body,
+        headers=sessions.claim_agent(run_id),
+    ).json()
+    assert 750 < result["payout"] < 1000
+    assert result["needs_sign_off"] is True

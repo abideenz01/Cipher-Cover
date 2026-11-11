@@ -43,6 +43,21 @@ def reply(content: str, calls: list[tuple[str, dict[str, Any]]], n: int) -> AIMe
     )
 
 
+def line(claim_type: str, item: dict[str, Any]) -> dict[str, Any]:
+    """Return a payout line: a belonging on a baggage claim, else an expense."""
+    kind = "item" if claim_type == "baggage" else "expense"
+    if item["category"] == "electronics":
+        kind = "electronics"
+    return {
+        "description": item["description"],
+        "amount": item["amount"],
+        "kind": kind,
+        "quantity": 1,
+        "nights": 0,
+        "hours": 0,
+    }
+
+
 class ScriptedModel(BaseChatModel):
     """Approve and pay every claim, with every item as a line."""
 
@@ -75,14 +90,7 @@ class ScriptedModel(BaseChatModel):
             "": ("get_claim", {"claim_id": claim_id}),
         }
         if claim:
-            lines = [
-                {
-                    "description": i["description"],
-                    "amount": i["amount"],
-                    "electronic": i["category"] == "electronics",
-                }
-                for i in claim["items"]
-            ]
+            lines = [line(claim["claim_type"], i) for i in claim["items"]]
             script |= {
                 "get_claim": ("get_policy", {"policy_id": claim["policy_id"]}),
                 "get_policy": (

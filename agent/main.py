@@ -22,7 +22,7 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_config
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, Field, SecretStr
 
 from agent import tracing
 
@@ -77,9 +77,29 @@ class ClaimTimeout(Exception):
 class Line(BaseModel):
     """One item or expense to pay."""
 
-    description: str
-    amount: float
-    electronic: bool
+    description: str = Field(description="What the item or expense is")
+    amount: float = Field(
+        description="The total claimed for the line in US dollars, before any limit"
+    )
+    kind: Literal[
+        "item", "electronics", "cash", "expense", "hotel", "meals_without_receipts"
+    ] = Field(
+        description=(
+            "item: a belonging lost, stolen or damaged; a pair or a set is one item."
+            " electronics: a phone, tablet, laptop, camera or its lens, e-reader or"
+            " smartwatch. cash: cash lost or stolen. hotel: a room during a trip"
+            " delay. meals_without_receipts: meals during a trip delay with no"
+            " receipts. expense: any other cost with a receipt, such as a meal,"
+            " a taxi, a fee, a medical bill or a prepaid trip cost"
+        )
+    )
+    quantity: int = Field(
+        description="How many separate items the line holds; 1 for anything else"
+    )
+    nights: int = Field(description="For a hotel, the nights; otherwise 0")
+    hours: float = Field(
+        description="For meals without receipts, the delay in hours; otherwise 0"
+    )
 
 
 def backend() -> httpx.Client:

@@ -89,15 +89,17 @@ def calculate_payout(claim_id: str, body: Calculation, who: auth.Who) -> dict[st
         claim = store.claim_row(conn, claim_id, who.tenant_id)
         policy = store.policy_view(conn, claim["policy_id"], who.tenant_id)
         benefit = json.loads(claim["data"])["claim_type"]
+        company = db.reference(conn, "company", who.tenant_id)
         total, steps = payout.calculate(
-            policy, benefit, body.lines, body.paid_by_others
+            policy, company, benefit, body.lines, body.paid_by_others
         )
+        over = total > limit_cents(conn, who.tenant_id)
         conn.execute(
             "INSERT INTO calculations (claim_id, payout_cents, steps, created_at,"
             " tenant_id) VALUES (?, ?, ?, ?, ?)",
             (claim_id, total, json.dumps(steps), clock.stamp(), who.tenant_id),
         )
-    return {"payout": db.dollars(total), "steps": steps}
+    return {"payout": db.dollars(total), "steps": steps, "needs_sign_off": over}
 
 
 @router.post("/claims/{claim_id}/decision", operation_id="record_decision")
