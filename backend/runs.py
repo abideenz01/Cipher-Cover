@@ -1,7 +1,6 @@
 """Agent runs on claims and their trace."""
 
 import json
-import sqlite3
 import threading
 import uuid
 from collections.abc import Callable
@@ -20,9 +19,7 @@ def spawn(work: Callable[[], None]) -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
-def lease(
-    conn: sqlite3.Connection, claim_id: str, queue_run_id: str, tenant_id: str
-) -> str:
+def lease(conn: db.Connection, claim_id: str, queue_run_id: str, tenant_id: str) -> str:
     """Move a waiting claim to in progress under a new claim run, or raise 409.
 
     The claim is taken in one conditional update, so two callers can never both
@@ -42,8 +39,9 @@ def lease(
     run_id = uuid.uuid4().hex
     conn.execute(
         "INSERT INTO runs (run_id, claim_id, status, error, started_at, ended_at,"
-        " queue_run_id, attempt, failure, tokens, model_calls, model, tenant_id)"
-        " VALUES (?, ?, 'running', '', ?, '', ?, ?, '', 0, 0, '', ?)",
+        " queue_run_id, attempt, failure, tokens, model_calls, model, tenant_id, seq)"
+        " VALUES (?, ?, 'running', '', ?, '', ?, ?, '', 0, 0, '', ?,"
+        " (SELECT COALESCE(MAX(seq), 0) + 1 FROM runs))",
         (run_id, claim_id, clock.stamp(), queue_run_id, attempt + 1, tenant_id),
     )
     return run_id
@@ -55,7 +53,7 @@ def begin(claim_id: str, tenant_id: str) -> str:
         return lease(conn, claim_id, "", tenant_id)
 
 
-def claim_token(conn: sqlite3.Connection, run_id: str) -> str:
+def claim_token(conn: db.Connection, run_id: str) -> str:
     """Issue the token a claim agent works its run with, bound to its claim."""
     run = conn.execute(
         "SELECT claim_id, tenant_id FROM runs WHERE run_id = ?", (run_id,)
@@ -72,7 +70,7 @@ def claim_token(conn: sqlite3.Connection, run_id: str) -> str:
     )
 
 
-def tenant_of(conn: sqlite3.Connection, run_id: str) -> str:
+def tenant_of(conn: db.Connection, run_id: str) -> str:
     """Return the tenant of a claim run or a queue run."""
     row = conn.execute(
         "SELECT tenant_id FROM runs WHERE run_id = ?"

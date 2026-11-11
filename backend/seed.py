@@ -8,10 +8,11 @@ Neither reads the answer keys or the security claims.
 import json
 import os
 import secrets
-import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
 
 from backend import auth, clock, db, migrations
 
@@ -58,7 +59,7 @@ def roles_for(handler: dict[str, Any]) -> tuple[str, ...]:
 
 
 def add_user(  # noqa: PLR0913, PLR0917 - one argument per column
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     tenant_id: str,
     user_id: str,
     handler_id: str,
@@ -88,7 +89,7 @@ def add_user(  # noqa: PLR0913, PLR0917 - one argument per column
 
 
 def seed_users(
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     tenant_id: str,
     folder: str,
     staff: tuple[tuple[str, str, str, tuple[str, ...]], ...],
@@ -122,24 +123,24 @@ def seed_users(
             print(f"Demo sign-in {email} password {password}")
 
 
-def add_tenant(conn: sqlite3.Connection, tenant_id: str, folder: str) -> None:
+def add_tenant(conn: db.Connection, tenant_id: str, folder: str) -> None:
     """Add a tenant and its own settings, unless it is already there."""
     if not folder:
         return
     tenant = load("tenant.json", folder)
     conn.execute(
-        "INSERT OR IGNORE INTO tenants (tenant_id, name, timezone, config)"
-        " VALUES (?, ?, ?, ?)",
+        "INSERT INTO tenants (tenant_id, name, timezone, config)"
+        " VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
         (tenant_id, tenant["name"], tenant["timezone"], json.dumps(tenant["config"])),
     )
     conn.execute(
-        "INSERT OR IGNORE INTO tenant_reference (tenant_id, name, data)"
-        " VALUES (?, 'company', ?)",
+        "INSERT INTO tenant_reference (tenant_id, name, data)"
+        " VALUES (?, 'company', ?) ON CONFLICT DO NOTHING",
         (tenant_id, json.dumps(load("company.json", folder))),
     )
 
 
-def seed_records(conn: sqlite3.Connection, tenant_id: str, folder: str) -> None:
+def seed_records(conn: db.Connection, tenant_id: str, folder: str) -> None:
     """Load a tenant's customers, policies, handlers and claims, if it has none."""
     held = conn.execute(
         "SELECT COUNT(*) FROM claims WHERE tenant_id = ?", (tenant_id,)
@@ -194,16 +195,25 @@ def seed_records(conn: sqlite3.Connection, tenant_id: str, folder: str) -> None:
     )
 
 
+def clear() -> None:
+    """Remove every table: the SQLite file, or the whole schema on PostgreSQL."""
+    if db.postgres():
+        with db.connect() as conn:
+            conn.execute(f"DROP SCHEMA IF EXISTS {db.SCHEMA_NAME} CASCADE")
+        return
+    for suffix in ("", "-wal", "-shm"):
+        Path(db.path() + suffix).unlink(missing_ok=True)
+
+
 def seed(reset: bool = False) -> None:
     """Bring the schema up to date and load any tenant that has no records yet."""
     if reset:
-        for suffix in ("", "-wal", "-shm"):
-            Path(db.path() + suffix).unlink(missing_ok=True)
+        clear()
     with db.connect() as conn:
         migrations.apply(conn)
         for name in ("company", "plans"):
             conn.execute(
-                "INSERT OR IGNORE INTO reference VALUES (?, ?)",
+                "INSERT INTO reference VALUES (?, ?) ON CONFLICT DO NOTHING",
                 (name, json.dumps(load(f"{name}.json"))),
             )
         for tenant_id, folder, staff in TENANTS:
@@ -215,5 +225,6 @@ def seed(reset: bool = False) -> None:
 
 
 if __name__ == "__main__":
+    load_dotenv(override=False)
     seed(reset="--reset" in sys.argv)
-    print(f"Seeded {db.path()}")
+    print(f"Seeded {'PostgreSQL' if db.postgres() else db.path()}")

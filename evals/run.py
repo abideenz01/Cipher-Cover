@@ -83,6 +83,7 @@ def backend_for(data: Dataset, medical: bool) -> Iterator[None]:
         with environment(
             DATA_DIR=str(folder),
             DB_PATH=str(Path(tmp) / "eval.db"),
+            DATABASE_URL="",
             DEMO_PASSWORD=secrets.token_urlsafe(16),
         ):
             seed.seed()

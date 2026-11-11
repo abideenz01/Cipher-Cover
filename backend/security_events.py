@@ -1,14 +1,13 @@
 """The security event log: sign-ins, refusals, sign-offs and token issues."""
 
 import json
-import sqlite3
 from typing import Any
 
-from backend import clock
+from backend import clock, db
 
 
 def record(  # noqa: PLR0913, PLR0917 - one argument per column of the log
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     tenant_id: str,
     actor: str,
     kind: str,
@@ -35,7 +34,7 @@ def record(  # noqa: PLR0913, PLR0917 - one argument per column of the log
 
 
 def latest(
-    conn: sqlite3.Connection, tenant_id: str, limit: int = 200
+    conn: db.Connection, tenant_id: str, limit: int = 200
 ) -> list[dict[str, Any]]:
     """Return a tenant's latest events, newest first."""
     rows = conn.execute(

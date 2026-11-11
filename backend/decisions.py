@@ -1,7 +1,6 @@
 """Working out payouts, recording decisions and paying claims."""
 
 import json
-import sqlite3
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -38,15 +37,13 @@ class Payment(BaseModel):
     amount: float
 
 
-def limit_cents(conn: sqlite3.Connection, tenant_id: str) -> int:
+def limit_cents(conn: db.Connection, tenant_id: str) -> int:
     """Return the tenant's payout approval limit in cents."""
     company = db.reference(conn, "company", tenant_id)
     return db.cents(company["payout_approval_limit"])
 
 
-def holds(
-    conn: sqlite3.Connection, who: auth.Principal, run_id: str, claim_id: str
-) -> None:
+def holds(conn: db.Connection, who: auth.Principal, run_id: str, claim_id: str) -> None:
     """Refuse unless the run is a live claim run on this claim, under this token."""
     store.claim_row(conn, claim_id, who.tenant_id)
     if store.live_run(conn, run_id, who.tenant_id)["claim_id"] != claim_id:
@@ -55,7 +52,7 @@ def holds(
         raise HTTPException(403, f"This token is not for run {run_id}.")
 
 
-def cited(conn: sqlite3.Connection, run_id: str, ids: list[str]) -> str:
+def cited(conn: db.Connection, run_id: str, ids: list[str]) -> str:
     """Return the cited sections as text, or refuse what the run never read."""
     if not ids:
         raise HTTPException(409, "Cite at least one section you relied on.")
@@ -70,9 +67,7 @@ def cited(conn: sqlite3.Connection, run_id: str, ids: list[str]) -> str:
     return "; ".join(sections.title(s) for s in ids)
 
 
-def pay(
-    conn: sqlite3.Connection, tenant_id: str, claim_id: str, amount_cents: int
-) -> None:
+def pay(conn: db.Connection, tenant_id: str, claim_id: str, amount_cents: int) -> None:
     """Record a payment. No money leaves the system."""
     conn.execute(
         "INSERT INTO payments (claim_id, amount_cents, created_at, tenant_id)"

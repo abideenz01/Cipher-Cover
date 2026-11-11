@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -25,9 +24,7 @@ def withheld(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def summary(
-    conn: sqlite3.Connection, row: sqlite3.Row, who: auth.Principal
-) -> dict[str, Any]:
+def summary(conn: db.Connection, row: db.Row, who: auth.Principal) -> dict[str, Any]:
     """Return one claim as it appears in the queue. Agents see a short name only."""
     data = json.loads(row["data"])
     name = store.customer_name(conn, row["customer_id"], row["tenant_id"])

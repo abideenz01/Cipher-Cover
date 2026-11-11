@@ -22,7 +22,8 @@ export default defineConfig({
         VOICE_PROVIDER: "stub",
         DEMO_PASSWORD: "e2e-demo-password",
         COOKIE_SECURE: "0",
-        // Empty, so a developer's .env can't send e2e runs to Langfuse.
+        // Empty, so a developer's .env can't move e2e runs to Supabase or Langfuse.
+        DATABASE_URL: "",
         LANGFUSE_PUBLIC_KEY: "",
         LANGFUSE_SECRET_KEY: "",
         LANGFUSE_BASE_URL: "",

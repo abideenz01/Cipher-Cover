@@ -4,7 +4,7 @@ Session and service tokens are stored only as SHA-256 hashes, and passwords
 only as scrypt hashes.
 """
 
-import sqlite3
+from backend import db
 
 VERSION = 3
 NAME = "auth"
@@ -34,8 +34,8 @@ CREATE INDEX security_events_tenant ON security_events (tenant_id);
 """
 
 
-def upgrade(conn: sqlite3.Connection) -> None:
+def upgrade(conn: db.Connection) -> None:
     """Create the account, session, token and event tables."""
     for statement in SCHEMA.split(";"):
         if statement.strip():
-            conn.execute(statement)
+            conn.execute(db.ddl(statement, conn.dialect))

@@ -16,7 +16,6 @@ import hmac
 import json
 import os
 import secrets
-import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Annotated, Any
@@ -117,13 +116,13 @@ def past(stamp: str) -> bool:
     return datetime.fromisoformat(stamp) <= clock.now()
 
 
-def roles_of(conn: sqlite3.Connection, user_id: str) -> frozenset[str]:
+def roles_of(conn: db.Connection, user_id: str) -> frozenset[str]:
     """Return a user's roles."""
     rows = conn.execute("SELECT role FROM user_roles WHERE user_id = ?", (user_id,))
     return frozenset(r["role"] for r in rows.fetchall())
 
 
-def person(conn: sqlite3.Connection, user: sqlite3.Row) -> Principal:
+def person(conn: db.Connection, user: db.Row) -> Principal:
     """Return the principal for a signed-in user."""
     roles = roles_of(conn, user["user_id"])
     return Principal(
@@ -137,14 +136,14 @@ def person(conn: sqlite3.Connection, user: sqlite3.Row) -> Principal:
     )
 
 
-def active_user(conn: sqlite3.Connection, user_id: str) -> sqlite3.Row | None:
+def active_user(conn: db.Connection, user_id: str) -> db.Row | None:
     """Return an active user's row, or None."""
     return conn.execute(
         "SELECT * FROM users WHERE user_id = ? AND status = 'active'", (user_id,)
     ).fetchone()
 
 
-def create_session(conn: sqlite3.Connection, user: sqlite3.Row) -> tuple[str, str]:
+def create_session(conn: db.Connection, user: db.Row) -> tuple[str, str]:
     """Start a session and return its token and CSRF token."""
     token = "cs_" + secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(24)
@@ -166,7 +165,7 @@ def create_session(conn: sqlite3.Connection, user: sqlite3.Row) -> tuple[str, st
 
 
 def session_principal(
-    conn: sqlite3.Connection, token: str, request: Request, cookie: bool
+    conn: db.Connection, token: str, request: Request, cookie: bool
 ) -> Principal | None:
     """Return the principal for a live session, refreshing when it was seen."""
     row = conn.execute(
@@ -202,7 +201,7 @@ def session_principal(
 
 
 def issue(  # noqa: PLR0913, PLR0917 - a token's binding, one argument each
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     tenant_id: str,
     kind: str,
     seconds: float,
@@ -239,7 +238,7 @@ def issue(  # noqa: PLR0913, PLR0917 - a token's binding, one argument each
     return token
 
 
-def revoke(conn: sqlite3.Connection, run_id: str) -> None:
+def revoke(conn: db.Connection, run_id: str) -> None:
     """Revoke every service token issued for a run."""
     conn.execute(
         "UPDATE service_tokens SET revoked_at = ? WHERE run_id = ? AND revoked_at = ''",
@@ -247,7 +246,7 @@ def revoke(conn: sqlite3.Connection, run_id: str) -> None:
     )
 
 
-def revoke_token(conn: sqlite3.Connection, token: str) -> None:
+def revoke_token(conn: db.Connection, token: str) -> None:
     """Revoke one service token."""
     conn.execute(
         "UPDATE service_tokens SET revoked_at = ? WHERE token_hash = ?",
@@ -255,7 +254,7 @@ def revoke_token(conn: sqlite3.Connection, token: str) -> None:
     )
 
 
-def service_principal(conn: sqlite3.Connection, token: str) -> Principal | None:
+def service_principal(conn: db.Connection, token: str) -> Principal | None:
     """Return the principal for a live service token."""
     row = conn.execute(
         "SELECT * FROM service_tokens WHERE token_hash = ? AND revoked_at = ''",
@@ -291,7 +290,7 @@ def ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
-def authenticate(conn: sqlite3.Connection, request: Request) -> Principal | None:
+def authenticate(conn: db.Connection, request: Request) -> Principal | None:
     """Return the caller, from a bearer token or the session cookie, or None."""
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):
@@ -303,7 +302,7 @@ def authenticate(conn: sqlite3.Connection, request: Request) -> Principal | None
     return session_principal(conn, cookie, request, cookie=True) if cookie else None
 
 
-def bound(conn: sqlite3.Connection, who: Principal, request: Request) -> str:
+def bound(conn: db.Connection, who: Principal, request: Request) -> str:
     """Return why an agent's token does not reach this request, or '' if it does."""
     params = dict(request.path_params)
     if "run_id" in request.query_params:
@@ -387,7 +386,7 @@ def current(found: Annotated[Principal | None, Depends(guard)]) -> Principal:
 Who = Annotated[Principal, Depends(current)]
 
 
-def tenant_config(conn: sqlite3.Connection, tenant_id: str) -> dict[str, Any]:
+def tenant_config(conn: db.Connection, tenant_id: str) -> dict[str, Any]:
     """Return a tenant's settings."""
     row = conn.execute(
         "SELECT config FROM tenants WHERE tenant_id = ?", (tenant_id,)
@@ -402,7 +401,7 @@ class Login(BaseModel):
     password: str
 
 
-def throttled(conn: sqlite3.Connection, *keys: str) -> bool:
+def throttled(conn: db.Connection, *keys: str) -> bool:
     """Return whether any key has failed too often lately.
 
     Failures are kept in the database, so a restart or a second backend
@@ -419,7 +418,7 @@ def throttled(conn: sqlite3.Connection, *keys: str) -> bool:
     return False
 
 
-def failed(conn: sqlite3.Connection, *keys: str) -> None:
+def failed(conn: db.Connection, *keys: str) -> None:
     """Count a failed sign-in against each key, and forget old failures."""
     conn.execute(
         "DELETE FROM login_failures WHERE created_at <= ?",
@@ -431,7 +430,7 @@ def failed(conn: sqlite3.Connection, *keys: str) -> None:
     )
 
 
-def me(conn: sqlite3.Connection, who: Principal) -> dict[str, Any]:
+def me(conn: db.Connection, who: Principal) -> dict[str, Any]:
     """Describe the signed-in person to the dashboard."""
     tenant = conn.execute(
         "SELECT name FROM tenants WHERE tenant_id = ?", (who.tenant_id,)

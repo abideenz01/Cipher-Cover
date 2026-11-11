@@ -1,6 +1,5 @@
 """Handlers sign off payouts over the limit, or send claims back."""
 
-import sqlite3
 from datetime import datetime
 from typing import Any
 
@@ -19,7 +18,7 @@ class SendBack(BaseModel):
     reason: str = Field(min_length=1)
 
 
-def acting_handler(conn: sqlite3.Connection, who: auth.Principal) -> sqlite3.Row:
+def acting_handler(conn: db.Connection, who: auth.Principal) -> db.Row:
     """Return the handler record of the signed-in person, or refuse."""
     if not who.handler_id:
         raise HTTPException(403, "Only a claims handler can do that.")

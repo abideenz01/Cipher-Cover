@@ -10,6 +10,8 @@ from backend.voice import routes
 def database(tmp_path, monkeypatch):
     """Give every test a freshly seeded database with a session for each user."""
     monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    # Tests run on SQLite, even with a developer's .env loaded.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("DEMO_PASSWORD", sessions.PASSWORD)
     # Tests never reach Langfuse, even with a developer's .env loaded.
     for key in tracing.KEYS:

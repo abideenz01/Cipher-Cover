@@ -3,18 +3,19 @@
 Each migration is a module with a VERSION, a NAME and an upgrade(conn). The
 runner records what it applied in schema_migrations, so running it again
 changes nothing. All pending migrations run in one transaction: if one fails,
-none of them is recorded.
+none of them is recorded. On PostgreSQL they run in the `undercover` schema,
+made here if it is missing.
 """
 
-import sqlite3
 from types import ModuleType
 
-from backend import clock
+from backend import clock, db
 from backend.migrations import (
     m0001_baseline,
     m0002_tenancy,
     m0003_auth,
     m0004_tenant_settings,
+    m0005_run_order,
 )
 from backend.migrations.schema import SchemaMismatch
 
@@ -25,10 +26,11 @@ MIGRATIONS: list[ModuleType] = [
     m0002_tenancy,
     m0003_auth,
     m0004_tenant_settings,
+    m0005_run_order,
 ]
 
 
-def applied(conn: sqlite3.Connection) -> list[int]:
+def applied(conn: db.Connection) -> list[int]:
     """Return the versions already applied, in order."""
     rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version")
     return [r[0] for r in rows.fetchall()]
@@ -39,11 +41,13 @@ def head() -> int:
     return MIGRATIONS[-1].VERSION
 
 
-def apply(conn: sqlite3.Connection) -> list[int]:
+def apply(conn: db.Connection) -> list[int]:
     """Apply every pending migration and return the versions applied now."""
-    if conn.in_transaction:
-        conn.commit()
-    conn.execute("BEGIN")
+    if conn.dialect == "postgresql":
+        conn.execute(f"CREATE SCHEMA IF NOT EXISTS {db.SCHEMA_NAME}")
+    else:
+        # SQLite only puts DDL in a transaction that was begun by hand.
+        conn.execute("BEGIN")
     try:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations ("

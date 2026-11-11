@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from backend import db, migrations, seed
+from backend import db, migrations, runs, seed
 from backend.migrations import m0002_tenancy
 from backend.migrations.schema import expected, tables
 
@@ -45,7 +45,7 @@ def recorded(path) -> list[int] | None:
 def test_a_fresh_database_reaches_the_head_version():
     with db.connect() as conn:
         assert migrations.applied(conn) == ALL
-        assert ALL[-1] == migrations.head() == 4
+        assert ALL[-1] == migrations.head() == 5
         found = tables(conn)
     baseline = expected(db.SCHEMA)
     for table, columns in baseline.items():
@@ -152,3 +152,22 @@ def test_reset_rebuilds_a_refused_database(empty):
             ).fetchone()[0]
             == 35
         )
+
+
+def test_runs_already_there_keep_their_order_and_new_ones_follow(empty):
+    conn = sqlite3.connect(empty)
+    conn.executescript(db.SCHEMA)
+    for run_id in ("b", "a"):
+        conn.execute(
+            "INSERT INTO runs VALUES (?, 'CLM-0001', 'succeeded', '',"
+            " '2026-11-01T00:00:00+00:00', '', 'Q', 1, '', 0, 0, '')",
+            (run_id,),
+        )
+    conn.commit()
+    conn.close()
+    seed.seed()
+    with db.connect() as conn:
+        runs.lease(conn, "CLM-1001", "Q", "T-UNDERCOVER")
+        rows = conn.execute("SELECT run_id, seq FROM runs ORDER BY seq").fetchall()
+    assert [r["run_id"] for r in rows][:2] == ["b", "a"]
+    assert [r["seq"] for r in rows] == [1, 2, 3]
