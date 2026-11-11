@@ -84,6 +84,8 @@ Run on 2026-11-11, before any change to the agent's tools or instructions, on th
 
 The six emergency medical claims: decision correct 3/6 with medical documents off and 5/6 with them on. With n=6 this is a hint, not a finding. It is consistent with the risk in `docs/PLAN_PRODUCTION.md` section E that the medical gate costs accuracy on these claims; the instruction wording for a withheld medical document is still to be decided on that evidence.
 
+After D2 (2026-11-11, `022d27c3cfa4`, medical off, fingerprint `9d599a9f5eb1`, $0.20): the payout rules moved into `calculate_payout`. Decisions 30/35 and payouts 28/35, the same as G1; decision and payout 28/35 (G1 27/35); refer recall 8/8 (G1 7/8). Three runs failed on the 120-second time limit (CLM-1003, CLM-1403, CLM-1404, all with medical documents), against none in G1. `evals.compare` finds no difference outside the intervals. The scripted figures above did not move, because the scripted model's lines meet the same limits as before.
+
 Every later measurement in `docs/PLAN_DURABLE.md` is compared with these two runs:
 
 ```bash

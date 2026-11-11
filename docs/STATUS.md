@@ -76,15 +76,18 @@ The durable-agent plan is in `docs/PLAN_DURABLE.md` (brief: `docs/DURABLE.md`). 
 |---|---|
 | D1 Tracing in Langfuse | Done 2026-11-11. Python 294 passed at 98.2%, TypeScript 42, Playwright 16 of 16 |
 | G1 Real-model baseline | Done 2026-11-11. Decisions 30/35 (medical off) and 31/35 (on); $0.30 |
-| D2 Payout rules from the manual | Not started |
-| D3 Supabase as the database | Not started |
-| D4 Row-level security | Not started |
+| D2 Payout rules from the manual | Done 2026-11-11. Real model: decisions 30/35, payouts 28/35 (as G1); $0.20 |
+| D3 Supabase as the database | Done 2026-11-11. Python 314 passed at 97.2%, TypeScript 42, Playwright 16 of 16 |
+| D4 Row-level security | Done 2026-11-11. 8 of 8 opt-in Postgres tests on Supabase; no advisor warnings |
 | D5 Durable claim agent | Not started |
 | D6 Agent service and sign-off resume | Not started |
 | D7 Live checks and docs | Not started |
 
 - 2026-11-11, D1: `agent/tracing.py` sends each claim's work to Langfuse when the three `LANGFUSE_*` settings are set, as one session named `<claim_id>:<thread_id>`, a new trace per run; the queue agent's run is the session `queue:<run_id>`. Langfuse gets what the model gets: medical documents stay withheld by the backend, contact details are never returned, and a mask replaces email addresses. Without the settings nothing is sent, which is how the tests run. Checked live: `auth_check()` passed, and one claim on `openrouter/free` (47,808 tokens, $0) appeared as one session with one trace of 65 observations (9 model calls, 14 tool calls). This Langfuse organization cannot use the legacy `GET /api/public/traces`; sessions are read through `GET /api/public/v2/observations`.
 - 2026-11-11, G1: the real-model baseline, before any change to the agent. Queue set, `deepseek/deepseek-v4.1-flash`, fingerprint `1c8b2cef2c28`. Medical off (`812783e22e15`): decisions 30/35, payouts 28/35, over-limit approvals waiting 8/8. Medical on (`6158f1b36985`): decisions 31/35, payouts 30/35. The six emergency medical claims went 3/6 with medical documents off and 5/6 with them on (n=6, a hint only). Spend so far: $0.30 of the $1.50.
+- 2026-11-11, D2: `calculate_payout` applies the manual's limits itself. A line has a `kind` (item, electronics, cash, expense, hotel, meals without receipts), `quantity`, `nights` and `hours`. The backend applies the per-item and Electronics Plus limits, $350 a night with a room for every two travelers, meals without receipts at the tenant's flat rate per traveler per started 24 hours, and cash up to $100 in all, and caps the deductible at what is left. The result says whether the payout needs sign-off under the tenant's own limit. The claim instructions no longer ask the agent to apply limits (fingerprint `9d599a9f5eb1`). Real model, medical off (`022d27c3cfa4`): decisions 30/35 and payouts 28/35, the same as G1; refer recall 8/8. Open: three medical claims (CLM-1003, CLM-1403, CLM-1404) hit the 120-second claim time limit, which none did in G1. With one run each this can't be told apart from a slow provider; D5's measurement checks it again. Spend so far: $0.50 of the $1.50.
+- 2026-11-11, D3: the backend runs on SQLAlchemy Core, on SQLite by default and on Supabase when `DATABASE_URL` is set (`backend/db.py`), with every query written once. Migration 0005 adds `seq` to `runs` and `queue_runs` in place of SQLite's rowid. `sqlalchemy` moved from the `server` group to the main dependencies; nothing new was added. Checked on Supabase: reseeding builds 25 tables in `undercover` (35 + 10 claims, 11 users), the main API flows pass with the scripted agent, and the dashboard signs in and shows the board. Note for the cloud: from this machine a round trip to the database (Seoul, `ap-northeast-2`) takes about 230 ms and opening a pooled connection about 750 ms, so a scripted queue run of four claims took about six minutes against seconds on SQLite. The backend and the agent should run in the same region as the database.
+- 2026-11-11, D4: row-level security on Supabase (migration 0006, `docs/ADR_POSTGRES.md`). Every signed-in request's queries run as `undercover_app` under its tenant. The opt-in tests (`TEST_DATABASE_URL=... uv run pytest -m postgres --no-cov`) passed 8 of 8, and the Supabase security advisor reports nothing.
 
 The harness plan is in `docs/PLAN_HARNESS.md`.
 

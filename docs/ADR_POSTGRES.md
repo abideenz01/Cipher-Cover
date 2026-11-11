@@ -1,6 +1,6 @@
 # ADR: PostgreSQL with row-level security before production
 
-Status: accepted, 2026-11-03. Not yet implemented.
+Status: accepted 2026-11-03; implemented 2026-11-11 on Supabase (see Implementation).
 
 ## Context
 
@@ -31,3 +31,15 @@ The production setup must have:
 - The application filters stay. They become the second layer behind RLS, not the only one.
 - The SQL uses `?` placeholders and a few SQLite-only features (`INSERT OR IGNORE`, `rowid` ordering, `ALTER TABLE ... ADD COLUMN` with a default). These must be ported, so the migration to Postgres is its own phase, not part of this upgrade.
 - Until that phase is done, adding a second real tenant is a deployment decision someone must sign off, knowing these limits.
+
+## Implementation (2026-11-11)
+
+- `backend/db.py` runs every query through SQLAlchemy Core: SQLite for tests and local work, PostgreSQL (Supabase, session pooler, at most 4 connections a process) when `DATABASE_URL` is set. All tables are in the `undercover` schema.
+- Migration `m0006_rls`: RLS enabled and forced on every tenant table with one policy, `tenant_id = current_setting('app.tenant_id', true)`, for reads and writes; `tenant_id` has no default; `user_roles` is protected through its user. The application role `undercover_app` has no login and no `BYPASSRLS` and owns nothing.
+- Each signed-in request's transaction takes `undercover_app` and the caller's tenant (`auth.scope`, `db.connect()`), so RLS applies to everything a route does. The owner's connection is used where there is no caller: startup recovery, sign-in and token checks, seeding and migrations, and the agent's background threads, which reach claims only through the API, where RLS applies.
+- `backend/tests/test_postgres.py` (opt-in, `TEST_DATABASE_URL`) checks isolation over the API, a query with its filter removed, inserts without a tenant, and writes into another tenant.
+
+Still out of scope:
+- The owner role (`postgres` on Supabase) has `BYPASSRLS`, so the background work above is protected by the application's filters only.
+- `reference` (shared company settings and plans) and `login_failures` (keyed by email and address) have no tenant and no RLS.
+- One database, one set of backups and one owner for all tenants. A per-tenant database or schema is a later decision.

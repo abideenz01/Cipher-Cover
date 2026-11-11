@@ -40,41 +40,40 @@ Done 2026-11-11: `812783e22e15` (medical off) and `6158f1b36985` (medical on), $
 - `backend/payout.py`: a line has `kind` (`item`, `electronics`, `cash`, `expense`, `hotel`, `meals_without_receipts`), `quantity`, `nights` and `hours`. The number of travelers comes from the policy. Everything is in cents. The result says whether the payout needs sign-off, using the tenant's limit.
 - `calculate_payout` takes the new line shape. Every input is required, as `docs/TECH_STACK.md` asks. The agent's tool and `backend/instructions_claim.md` change to match.
 
-Success criteria:
-- [ ] Tests cover the manual's three worked examples ($215, $1,500 with sign-off, $1,150 with sign-off), hotel rooms and nights, meals at 11 and 30 hours, the cash limit, quantity, the deductible capped at the total, and an Acme payout of $800 needing sign-off.
-- [ ] `record_decision` still requires the payout to match the latest calculation.
-- [ ] The scripted 5a figures are updated, with the reason given in `docs/EVALUATION.md`.
-- [ ] The real-model run (gate off) is repeated and compared with G1 using `evals.compare`.
+Success criteria (done 2026-11-11):
+- [x] Tests cover the manual's three worked examples ($215, $1,500 with sign-off, $1,150 with sign-off), hotel rooms and nights, meals at 11 and 30 hours, the cash limit, quantity, the deductible capped at the total, and an Acme payout of $800 needing sign-off.
+- [x] `record_decision` still requires the payout to match the latest calculation.
+- [x] The scripted 5a figures are checked: they did not move, because the scripted model's lines meet the same limits as before (noted in `docs/EVALUATION.md`).
+- [x] The real-model run (gate off) is repeated and compared with G1 using `evals.compare`: `022d27c3cfa4`, $0.20. Decisions 30/35 and payouts 28/35, as in G1; refer recall 8/8. Three medical claims hit the 120-second time limit (open, see `docs/STATUS.md`).
 
 ## Phase D3: Supabase as the database
 
-- `backend/db.py`: one SQLAlchemy Core engine. It is SQLite (WAL, 30-second busy timeout) unless `DATABASE_URL` is in the process's environment, in which case it is the Supabase session pooler with `search_path` set to `undercover` and a pool of at most 4 connections.
-- The 17 modules that use `sqlite3` are ported mechanically, with no change to their logic: named parameters instead of `?`, a portable upsert instead of `INSERT OR IGNORE`, explicit ids instead of `rowid`.
-- `backend/migrations/` keeps its chain and its rule of refusing a database that doesn't match, but checks the schema with SQLAlchemy's inspector instead of `sqlite_master` and `PRAGMA`. A harness SQLite database is still adopted as before. A new Supabase schema is built by running the whole chain.
-- `npm run dev` passes `.env` (`uv run --env-file .env`). The tests and `playwright.config.ts` never do. `backend.seed --reset` works on Supabase.
+- `backend/db.py`: one SQLAlchemy Core engine. It is SQLite (WAL, 30-second busy timeout, a fresh connection each time) unless `DATABASE_URL` is in the process's environment, in which case it is the Supabase session pooler through psycopg, with `search_path` set to `undercover` and a pool of at most 4 connections.
+- `db.connect()` keeps the sqlite3 methods every module uses (`execute`, `executemany`, rows read by name or position), so the 17 modules changed only their type hints. Queries keep their `?` placeholders, turned into named parameters in one place. The SQLite-only SQL is gone: `INSERT OR IGNORE` became `ON CONFLICT DO NOTHING`, and `rowid` ordering became a `seq` column (migration `m0005_run_order`). An integer key counts up on Postgres through `db.ddl()`.
+- `backend/migrations/` keeps its chain and its rule of refusing a database that doesn't match. A harness SQLite database is still adopted as before. On Postgres the schema is always built by the chain, and tables found without a migration record are refused.
+- The backend uses Supabase when `DATABASE_URL` is in its environment, which `npm run dev` gives it through `.env`. The tests, `playwright.config.ts` and the offline evaluations set it empty, so they stay on SQLite. `backend.seed --reset` drops and rebuilds the schema on Supabase.
 
-Success criteria:
-- [ ] Every existing Python, TypeScript and Playwright test passes on SQLite, with no test removed or weakened.
-- [ ] `uv run --env-file .env -m backend.seed --reset` builds the `undercover` schema on Supabase, and `list_tables` through the Supabase MCP server shows every table in `undercover` and none in `public`.
-- [ ] Counts on Supabase match the seed: 35 UnderCover claims and 10 Acme claims.
-- [ ] The dashboard against Supabase signs in, shows the board and opens a claim.
-- [ ] A test shows the pool never opens more than 4 connections.
+Success criteria (done 2026-11-11):
+- [x] Every existing Python, TypeScript and Playwright test passes on SQLite, with no test removed or weakened (Python 314 passed, TypeScript 42, Playwright 16 of 16).
+- [x] `uv run --env-file .env -m backend.seed --reset` builds the `undercover` schema on Supabase, and the Supabase MCP server shows every table in `undercover` and none in `public`.
+- [x] Counts on Supabase match the seed: 35 UnderCover claims and 10 Acme claims.
+- [x] The dashboard against Supabase signs in, shows the board and opens a claim (checked with a Playwright script).
+- [x] A test shows the pool never opens more than 4 connections.
 
 ## Phase D4: row-level security on Supabase
 
-- Migration `m0005_rls` (Postgres only):
-  - RLS with `FORCE ROW LEVEL SECURITY` on every tenant table, using `tenant_id = current_setting('app.tenant_id')` for both reads and writes;
+- Migration `m0006_rls` (Postgres only; nothing changes on SQLite):
+  - RLS with `FORCE ROW LEVEL SECURITY` on all 21 tenant tables, using `tenant_id = current_setting('app.tenant_id', true)` for both reads and writes, plus `user_roles` through its user;
   - `tenant_id` without a default;
-  - an application role that doesn't own the tables and can't bypass RLS. Migrations run as the owner.
-- `db.connect(tenant_id)` sets `SET LOCAL app.tenant_id` from the principal that `backend/auth.py` already resolves. Sign-in and startup recovery, which work across tenants, use the owner connection, and each such use is written down.
+  - an application role, `undercover_app`, that has no login, owns nothing and can't bypass RLS. Migrations run as the owner.
+- Supavisor needs no custom login: the owner's connection takes the application role for one transaction (`set_config('role', ...)`), so no second password is needed. `auth.scope`, an async dependency after the guard, holds the caller's tenant for the request, and `db.connect()` sets the role and `app.tenant_id` in one round trip inside every signed-in request. Work with no caller (startup recovery, sign-in, the agent's background threads) uses the owner's connection.
 - The tenant filters in the code stay, as a second layer.
-- Before building, check whether Supavisor's session pooler accepts the custom role. If it doesn't, stop and ask.
 
-Success criteria:
-- [ ] Opt-in tests (`-m postgres`, skipped without `DATABASE_URL`) run the cross-tenant suite against Supabase with RLS on.
-- [ ] A query with its tenant filter removed still returns only the caller's rows, and an insert with no tenant fails.
-- [ ] `get_advisors` through the Supabase MCP server reports no RLS warnings for `undercover`.
-- [ ] `docs/ADR_POSTGRES.md` is marked implemented and lists what is still out of scope.
+Success criteria (done 2026-11-11):
+- [x] Opt-in tests (`-m postgres`, skipped without `TEST_DATABASE_URL`) run against Supabase with RLS on, in an `undercover_test` schema that is dropped afterwards: 8 passed.
+- [x] A query with its tenant filter removed still returns only the caller's rows, and an insert with no tenant fails.
+- [x] `get_advisors` through the Supabase MCP server reports no security warnings.
+- [x] `docs/ADR_POSTGRES.md` is marked implemented and lists what is still out of scope.
 
 ## Phase D5: the durable claim agent
 
@@ -83,7 +82,7 @@ Success criteria:
 - Progress is saved after every step by the synchronous `PostgresSaver` (`durability="sync"`) in the `undercover` schema, sharing the 4-connection limit. Tests use `InMemorySaver`.
 - `pay_claim` is no longer one of the agent's tools, and the instructions change to match. The backend operation stays, for the pay step.
 - Backend changes, each in the module that does it today:
-  - **Migration `m0006`:** `runs` get `thread_id` and the states `paused` and `interrupted`.
+  - **Migration `m0007`:** `runs` get `thread_id` and the states `paused` and `interrupted`.
   - **`queue_runs.recover()`:** a claim stopped partway with a checkpoint is marked `interrupted`, with no new attempt and its claim kept. A claim that failed with an error goes back to waiting with an attempt counted, as today.
   - **`auth.py`:** issues a new claim token for the same run and thread when a claim resumes.
   - **`record_decision` and `pay_claim`:** a repeat of what is already recorded returns the claim. A different decision is still a 409.
