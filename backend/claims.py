@@ -76,6 +76,17 @@ def get_claim(claim_id: str, who: auth.Who) -> dict[str, Any]:
             "SELECT handler_id, reason, created_at FROM sendbacks WHERE claim_id = ?",
             (claim_id,),
         ).fetchall()
+        signoffs = conn.execute(
+            "SELECT s.amount_cents, s.created_at, h.name FROM signoffs s"
+            " JOIN handlers h ON h.handler_id = s.handler_id"
+            " AND h.tenant_id = s.tenant_id WHERE s.claim_id = ? ORDER BY s.id",
+            (claim_id,),
+        ).fetchall()
+        payments = conn.execute(
+            "SELECT amount_cents, created_at, signed_off_by, signed_off_at"
+            " FROM payments WHERE claim_id = ? ORDER BY id",
+            (claim_id,),
+        ).fetchall()
         documents = data["documents"]
         if who.agent and not medical:
             documents = withheld(documents)
@@ -89,6 +100,23 @@ def get_claim(claim_id: str, who: auth.Who) -> dict[str, Any]:
             "decisions": [store.decision_view(d) for d in decisions],
             "runs": [store.run_view(conn, r) for r in runs],
             "sendbacks": [dict(s) for s in sendbacks],
+            "signoffs": [
+                {
+                    "amount": db.dollars(s["amount_cents"]),
+                    "signed_off_by": s["name"],
+                    "signed_off_at": s["created_at"],
+                }
+                for s in signoffs
+            ],
+            "payments": [
+                {
+                    "amount": db.dollars(p["amount_cents"]),
+                    "paid_at": p["created_at"],
+                    "signed_off_by": p["signed_off_by"],
+                    "signed_off_at": p["signed_off_at"],
+                }
+                for p in payments
+            ],
         }
 
 

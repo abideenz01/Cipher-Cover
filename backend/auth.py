@@ -65,6 +65,8 @@ class Principal:
             return self.user_id
         if self.kind == "voice":
             return f"voice:{self.user_id}"
+        if self.kind == "service":
+            return "agent-service"
         return f"{self.kind}:{self.run_id}"
 
 
@@ -290,11 +292,21 @@ def ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+def agent_service(token: str) -> bool:
+    """Say whether a bearer token is the agent's service key."""
+    key = os.getenv("AGENT_SERVICE_KEY") or ""
+    return bool(key) and hmac.compare_digest(token, key)
+
+
 def authenticate(conn: db.Connection, request: Request) -> Principal | None:
     """Return the caller, from a bearer token or the session cookie, or None."""
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):
         token = header[7:].strip()
+        if agent_service(token):
+            return Principal(
+                kind="service", tenant_id="", operations=permissions.AGENT_SERVICE
+            )
         if token.startswith("ct_"):
             return service_principal(conn, token)
         return session_principal(conn, token, request, cookie=False)

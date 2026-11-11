@@ -45,7 +45,7 @@ def recorded(path) -> list[int] | None:
 def test_a_fresh_database_reaches_the_head_version():
     with db.connect() as conn:
         assert migrations.applied(conn) == ALL
-        assert ALL[-1] == migrations.head() == 6
+        assert ALL[-1] == migrations.head() == 7
         found = tables(conn)
     baseline = expected(db.SCHEMA)
     for table, columns in baseline.items():

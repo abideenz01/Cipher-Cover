@@ -155,7 +155,7 @@ def test_a_stopped_claim_carries_on_from_supabase_in_a_new_process(monkeypatch):
     close_checkpointer()
     queue_runs.recover()
     assert client.get(f"/api/runs/{run_id}").json()["status"] == "interrupted"
-    assert runs.resume_interrupted(sessions.TENANT) == [run_id]
+    assert runs.carry_on(sessions.TENANT) == [run_id]
     run = client.get(f"/api/runs/{run_id}").json()
     claim = client.get("/api/claims/CLM-1004").json()
     assert (run["status"], run["attempt"]) == ("succeeded", 1)

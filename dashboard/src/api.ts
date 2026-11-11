@@ -122,6 +122,21 @@ export interface Claim extends ClaimSummary {
   documents: ClaimDocument[];
   decisions: Decision[];
   runs: Run[];
+  signoffs: SignOff[];
+  payments: Payment[];
+}
+
+export interface SignOff {
+  amount: number;
+  signed_off_by: string;
+  signed_off_at: string;
+}
+
+export interface Payment {
+  amount: number;
+  paid_at: string;
+  signed_off_by: string;
+  signed_off_at: string;
 }
 
 export interface Policy {

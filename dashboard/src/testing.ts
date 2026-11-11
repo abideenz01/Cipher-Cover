@@ -124,6 +124,8 @@ export function claim(overrides: Partial<Claim> = {}): Claim {
     ],
     decisions: [],
     runs: [],
+    signoffs: [],
+    payments: [],
     ...overrides,
   };
 }

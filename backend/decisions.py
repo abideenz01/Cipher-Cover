@@ -82,22 +82,35 @@ def repeated(conn: db.Connection, claim_id: str, body: Decision) -> bool:
     )
 
 
-def signed_off(conn: db.Connection, claim_id: str, decision: db.Row) -> bool:
-    """Say whether a handler signed off this decision's payout."""
-    row = conn.execute(
-        "SELECT 1 FROM signoffs WHERE claim_id = ? AND amount_cents = ?"
-        " AND created_at >= ?",
+def signed_off(conn: db.Connection, claim_id: str, decision: db.Row) -> Any:  # noqa: ANN401 - a row or None
+    """Return the handler's sign-off of this decision's payout, or None."""
+    return conn.execute(
+        "SELECT handler_id, created_at FROM signoffs WHERE claim_id = ?"
+        " AND amount_cents = ? AND created_at >= ? ORDER BY id DESC",
         (claim_id, decision["payout_cents"], decision["created_at"]),
     ).fetchone()
-    return row is not None
 
 
-def pay(conn: db.Connection, tenant_id: str, claim_id: str, amount_cents: int) -> None:
-    """Record a payment. No money leaves the system."""
+def pay(  # noqa: PLR0913, PLR0917 - one argument per column
+    conn: db.Connection,
+    tenant_id: str,
+    claim_id: str,
+    amount_cents: int,
+    signed_off_by: str = "",
+    signed_off_at: str = "",
+) -> None:
+    """Record a payment, with the sign-off it rests on. No money leaves the system."""
     conn.execute(
-        "INSERT INTO payments (claim_id, amount_cents, created_at, tenant_id)"
-        " VALUES (?, ?, ?, ?)",
-        (claim_id, amount_cents, clock.stamp(), tenant_id),
+        "INSERT INTO payments (claim_id, amount_cents, created_at, tenant_id,"
+        " signed_off_by, signed_off_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            claim_id,
+            amount_cents,
+            clock.stamp(),
+            tenant_id,
+            signed_off_by,
+            signed_off_at,
+        ),
     )
 
 
@@ -191,8 +204,12 @@ def pay_claim(claim_id: str, body: Payment, who: auth.Who) -> dict[str, Any]:
             if paid == amount:
                 return {"claim_id": claim_id, "paid": db.dollars(amount)}
             raise HTTPException(409, "This claim is already paid.")
-        over = amount > limit_cents(conn, who.tenant_id)
-        if over and not signed_off(conn, claim_id, latest):
-            raise HTTPException(409, "Waiting for a handler's sign-off.")
-        pay(conn, who.tenant_id, claim_id, amount)
+        signoff = None
+        if amount > limit_cents(conn, who.tenant_id):
+            signoff = signed_off(conn, claim_id, latest)
+            if signoff is None:
+                raise HTTPException(409, "Waiting for a handler's sign-off.")
+        by, at = (signoff["handler_id"], signoff["created_at"]) if signoff else ("", "")
+        pay(conn, who.tenant_id, claim_id, amount, by, at)
+        store.set_state(conn, claim_id, "decided")
     return {"claim_id": claim_id, "paid": db.dollars(amount)}

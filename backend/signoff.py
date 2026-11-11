@@ -1,12 +1,24 @@
-"""Handlers sign off payouts over the limit, or send claims back."""
+"""Handlers sign off payouts over the limit, or send claims back.
 
+A sign-off records who signed off and when; it does not pay. The claim shows as
+in progress until the claim agent, which waited for the sign-off, picks the
+claim back up and pays it. The backend wakes the agent's service once the
+sign-off is saved and does not wait for the payment: the sign-off stands if the
+service can't be reached, and the service carries the claim on when it next
+starts.
+"""
+
+import logging
+import os
+import threading
 from datetime import datetime
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from backend import auth, clock, db, decisions, security_events, store
+from backend import auth, clock, db, security_events, store
 from backend.voice.briefs import speak_claim_id, speak_money
 
 router = APIRouter(prefix="/api")
@@ -16,6 +28,34 @@ class SendBack(BaseModel):
     """Why the signed-in handler is sending a claim back."""
 
     reason: str = Field(min_length=1)
+
+
+AGENT_URL = "http://127.0.0.1:8002"
+log = logging.getLogger(__name__)
+
+
+def agent_url() -> str:
+    """Return the address of the agent's service."""
+    return os.getenv("UNDERCOVER_AGENT") or AGENT_URL
+
+
+def wake_agent() -> None:
+    """Ask the agent's service, in the background, to carry on waiting claims."""
+    key = os.getenv("AGENT_SERVICE_KEY")
+    if key:
+        threading.Thread(target=knock, args=(key,), daemon=True).start()
+
+
+def knock(key: str) -> None:
+    """Call the agent's service once. A service that is down is not an error here."""
+    try:
+        httpx.post(
+            f"{agent_url()}/resume",
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=5,
+        )
+    except httpx.HTTPError as error:
+        log.warning("The agent's service could not be reached: %s", error)
 
 
 def acting_handler(conn: db.Connection, who: auth.Principal) -> db.Row:
@@ -61,7 +101,7 @@ def list_signoffs(who: auth.Who) -> list[dict[str, Any]]:
 
 @router.post("/claims/{claim_id}/sign-off", operation_id="sign_off_claim")
 def sign_off_claim(claim_id: str, who: auth.Who, request: Request) -> dict[str, Any]:
-    """The signed-in handler signs off a payout, which pays it."""
+    """The signed-in handler signs off a payout; the claim agent then pays it."""
     with db.connect() as conn:
         claim = store.claim_row(conn, claim_id, who.tenant_id)
         handler = acting_handler(conn, who)
@@ -71,12 +111,12 @@ def sign_off_claim(claim_id: str, who: auth.Who, request: Request) -> dict[str, 
             raise HTTPException(409, "This claim is not waiting for sign-off.")
         latest = store.decided(conn, claim_id)
         amount = latest["payout_cents"]
+        signed_at = clock.stamp()
         conn.execute(
             "INSERT INTO signoffs (claim_id, handler_id, amount_cents, created_at,"
             " tenant_id) VALUES (?, ?, ?, ?, ?)",
-            (claim_id, who.handler_id, amount, clock.stamp(), who.tenant_id),
+            (claim_id, who.handler_id, amount, signed_at, who.tenant_id),
         )
-        decisions.pay(conn, who.tenant_id, claim_id, amount)
         security_events.record(
             conn,
             who.tenant_id,
@@ -87,8 +127,14 @@ def sign_off_claim(claim_id: str, who: auth.Who, request: Request) -> dict[str, 
             auth.ip(request),
             {"amount_cents": amount},
         )
-        store.set_state(conn, claim_id, "decided")
-    return {"claim_id": claim_id, "state": "decided", "paid": db.dollars(amount)}
+        store.set_state(conn, claim_id, "in_progress")
+    wake_agent()
+    return {
+        "claim_id": claim_id,
+        "state": "in_progress",
+        "signed_off_by": who.handler_id,
+        "signed_off_at": signed_at,
+    }
 
 
 @router.post("/claims/{claim_id}/send-back", operation_id="send_back_claim")
@@ -116,4 +162,10 @@ def send_back_claim(
             auth.ip(request),
         )
         store.set_state(conn, claim_id, "waiting")
+        # The agent that waited for this sign-off has nothing left to do.
+        conn.execute(
+            "UPDATE runs SET status = 'succeeded', ended_at = ?"
+            " WHERE claim_id = ? AND status = 'paused'",
+            (clock.stamp(), claim_id),
+        )
     return {"claim_id": claim_id, "state": "waiting"}

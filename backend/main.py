@@ -22,9 +22,11 @@ from backend.voice import routes as voice
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Seed an empty database on startup and free what a stopped backend left."""
+    """Seed an empty database on startup, deal with what a stopped backend left,
+    and ask the agent's service to carry on any claim that is due."""
     seed.seed()
     queue_runs.recover()
+    signoff.wake_agent()
     yield
 
 

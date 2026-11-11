@@ -201,7 +201,7 @@ def work(run_id: str) -> None:
         token = auth.issue(conn, tenant_id, "queue", QUEUE_TOKEN_SECONDS, run_id=run_id)
     try:
         # Finish what a stopped run left, on its own threads, before planning.
-        runs.resume_interrupted(tenant_id)
+        runs.carry_on(tenant_id)
         runner.execute_queue(run_id, runs.record, token)
     except Exception as error:  # noqa: BLE001 - a failed run must free its claims
         close(run_id, main.describe(error), main.failure(error))

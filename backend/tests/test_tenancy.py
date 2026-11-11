@@ -55,6 +55,7 @@ def test_only_health_login_and_public_config_are_open():
 def test_every_operation_has_someone_who_may_call_it():
     callers = set(permissions.PUBLIC) | permissions.CLAIM_AGENT
     callers |= permissions.QUEUE_AGENT | permissions.VOICE_AGENT
+    callers |= permissions.AGENT_SERVICE
     for allowed in permissions.ROLES.values():
         callers |= allowed
     operations = {o for o, _, _ in OPERATIONS}

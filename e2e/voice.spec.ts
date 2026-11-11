@@ -75,9 +75,10 @@ test("a sign-off by voice is only confirmed by a click", async ({ page }) => {
   await row.getByRole("button", { name: /Confirm sign-off as HND-01/ }).click();
   await expect(row).toBeHidden();
   await page.getByRole("link", { name: "Queue" }).click();
+  // The claim agent pays it; until then it shows as in progress.
   await expect(
     page
-      .getByRole("region", { name: "Decided", exact: true })
+      .getByRole("region", { name: "In progress", exact: true })
       .getByRole("button", { name: /CLM-1405/ }),
   ).toBeVisible();
 });

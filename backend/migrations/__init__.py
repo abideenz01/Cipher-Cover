@@ -17,6 +17,7 @@ from backend.migrations import (
     m0004_tenant_settings,
     m0005_run_order,
     m0006_rls,
+    m0007_signed_off_payments,
 )
 from backend.migrations.schema import SchemaMismatch
 
@@ -29,6 +30,7 @@ MIGRATIONS: list[ModuleType] = [
     m0004_tenant_settings,
     m0005_run_order,
     m0006_rls,
+    m0007_signed_off_payments,
 ]
 
 

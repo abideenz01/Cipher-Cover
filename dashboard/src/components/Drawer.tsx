@@ -7,6 +7,7 @@ import {
   FAILURE_LABELS,
   label,
   money,
+  time,
 } from "../format";
 import { Ledger } from "./Ledger";
 import { DecisionChip, StateChip } from "./StateChip";
@@ -151,6 +152,8 @@ function DecisionTab({
   onRun: () => void;
 }>) {
   const decision = claim.decisions.at(-1);
+  const signoff = claim.signoffs.at(-1);
+  const payment = claim.payments.at(-1);
   const runButton = claim.state === "waiting" && (
     <button type="button" className="button primary" onClick={onRun}>
       Run the agent
@@ -180,9 +183,19 @@ function DecisionTab({
         {claim.state === "waiting_for_signoff" && (
           <p className="muted">Waiting for a handler's sign-off.</p>
         )}
-        {claim.paid > 0 && (
+        {signoff && claim.paid === 0 && (
           <p className="muted">
-            Paid <span className="mono">{money(claim.paid)}</span>.
+            Signed off by {signoff.signed_off_by} at{" "}
+            {time(signoff.signed_off_at)}. The agent is paying it.
+          </p>
+        )}
+        {payment && (
+          <p className="muted">
+            Paid <span className="mono">{money(payment.amount)}</span> at{" "}
+            {time(payment.paid_at)}
+            {signoff && payment.signed_off_at
+              ? `, signed off by ${signoff.signed_off_by} at ${time(payment.signed_off_at)}.`
+              : "."}
           </p>
         )}
       </section>

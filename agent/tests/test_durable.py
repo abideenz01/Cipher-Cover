@@ -80,7 +80,7 @@ def test_a_stopped_claim_carries_on_from_its_last_step(monkeypatch):
     assert claim["state"] == "in_progress"
     assert claim["failed_attempts"] == 0
 
-    assert runs.resume_interrupted(sessions.TENANT) == [run_id]
+    assert runs.carry_on(sessions.TENANT) == [run_id]
     run = run_row(run_id)
     assert run["status"] == "succeeded"
     assert run["attempt"] == 1
@@ -104,7 +104,7 @@ def test_a_claim_stopped_before_its_first_step_starts_on_the_same_thread(
 ):
     run_id = start_stopped("CLM-1001", StopsAt(at=1))
     restart(monkeypatch)
-    runs.resume_interrupted(sessions.TENANT)
+    runs.carry_on(sessions.TENANT)
     assert run_row(run_id)["status"] == "succeeded"
     assert counts("CLM-1001") == [1, 1]
 
@@ -123,7 +123,7 @@ def test_a_stop_while_paying_pays_once(monkeypatch):
     run_id = start_stopped("CLM-1001", ScriptedModel())
     assert counts("CLM-1001") == [1, 1]
     restart(monkeypatch)
-    runs.resume_interrupted(sessions.TENANT)
+    runs.carry_on(sessions.TENANT)
     assert run_row(run_id)["status"] == "succeeded"
     assert counts("CLM-1001") == [1, 1]
 
@@ -142,7 +142,7 @@ def test_a_stop_after_the_decision_records_it_once(monkeypatch):
     run_id = start_stopped("CLM-1001", ScriptedModel())
     assert counts("CLM-1001") == [1, 0]
     restart(monkeypatch)
-    runs.resume_interrupted(sessions.TENANT)
+    runs.carry_on(sessions.TENANT)
     assert run_row(run_id)["status"] == "succeeded"
     assert counts("CLM-1001") == [1, 1]
 

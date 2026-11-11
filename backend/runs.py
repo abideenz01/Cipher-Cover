@@ -7,9 +7,10 @@ from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from agent import main
-from backend import auth, clock, db, runner, store
+from backend import auth, clock, db, decisions, runner, store
 
 router = APIRouter(prefix="/api")
 
@@ -111,6 +112,31 @@ def record(run_id: str, step: dict[str, Any]) -> None:
         )
 
 
+class Step(BaseModel):
+    """One step of a claim run's trace, sent by the agent's service."""
+
+    kind: str
+    name: str
+    detail: dict[str, Any]
+
+
+class RunEnd(BaseModel):
+    """How a claim run that the agent's service carried on ended."""
+
+    error: str
+    failure: str
+
+
+def signed_off(conn: db.Connection, claim: db.Row) -> Any:  # noqa: ANN401 - a row or None
+    """Return the sign-off of a claim that is signed off and not yet paid, or None."""
+    latest = store.latest_decision(conn, claim["claim_id"])
+    if claim["state"] != "in_progress" or latest is None:
+        return None
+    if store.paid_cents(conn, claim["claim_id"]):
+        return None
+    return decisions.signed_off(conn, claim["claim_id"], latest)
+
+
 def waiting(conn: db.Connection, run_id: str, claim: db.Row) -> bool:
     """Say whether this run approved the claim and waits for its sign-off."""
     if claim["state"] != "waiting_for_signoff":
@@ -129,8 +155,9 @@ def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> No
         auth.revoke(conn, run_id)
         tenant_id = tenant_of(conn, run_id)
         claim = store.claim_row(conn, claim_id, tenant_id)
-        undecided = claim["state"] == "in_progress"
-        status = "paused" if waiting(conn, run_id, claim) else "succeeded"
+        held = waiting(conn, run_id, claim) or signed_off(conn, claim) is not None
+        undecided = claim["state"] == "in_progress" and not held
+        status = "paused" if held else "succeeded"
         if not error and undecided:
             error = "The agent finished without recording a decision."
         if undecided:
@@ -144,7 +171,7 @@ def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> No
             "UPDATE runs SET status = ?, error = ?, failure = ?, ended_at = ?"
             " WHERE run_id = ?",
             (
-                "failed" if error else status,
+                "failed" if error and not held else status,
                 error,
                 failure if error else "",
                 clock.stamp(),
@@ -210,17 +237,81 @@ def resume(run_id: str, signoff: dict[str, Any] | None) -> None:
     attempt(run_id, claim_id, go)
 
 
-def resume_interrupted(tenant_id: str) -> list[str]:
-    """Carry on every run of a tenant that a restart stopped, oldest first."""
-    with db.connect() as conn:
-        rows = conn.execute(
-            "SELECT run_id FROM runs WHERE status = 'interrupted' AND tenant_id = ?"
-            " ORDER BY seq",
-            (tenant_id,),
-        ).fetchall()
+def resumable(conn: db.Connection, tenant_id: str) -> list[tuple[str, Any]]:
+    """Return the runs to carry on, oldest first, each with its sign-off or None.
+
+    These are runs a restart stopped, and runs that waited for a sign-off that
+    has now been given. With tenant_id '' they are every tenant's.
+    """
+    rows = conn.execute(
+        "SELECT runs.run_id, runs.status, claims.* FROM runs"
+        " JOIN claims ON claims.claim_id = runs.claim_id"
+        " WHERE (runs.status = 'interrupted'"
+        " OR (runs.status = 'paused' AND claims.state = 'in_progress'))"
+        " AND (? = '' OR runs.tenant_id = ?) ORDER BY runs.seq",
+        (tenant_id, tenant_id),
+    ).fetchall()
+    found = []
     for row in rows:
-        resume(row["run_id"], None)
-    return [r["run_id"] for r in rows]
+        signoff = signed_off(conn, row) if row["status"] == "paused" else None
+        if row["status"] == "paused" and signoff is None:
+            continue
+        found.append((row["run_id"], signoff and dict(signoff)))
+    return found
+
+
+def carry_on(tenant_id: str) -> list[str]:
+    """Carry on, on this backend's threads, every run of a tenant that is due."""
+    with db.connect() as conn:
+        due = resumable(conn, tenant_id)
+    for run_id, signoff in due:
+        resume(run_id, signoff)
+    return [run_id for run_id, _ in due]
+
+
+def hand_over() -> list[dict[str, Any]]:
+    """Take every due run back to running, with a token, for the agent's service."""
+    with db.connect() as conn:
+        due = resumable(conn, "")
+    handed = []
+    for run_id, signoff in due:
+        claim_id = reopen(run_id)
+        if not claim_id:
+            continue
+        with db.connect() as conn:
+            tenant_id = tenant_of(conn, run_id)
+            company = db.reference(conn, "company", tenant_id)
+            handed.append(
+                {
+                    "run_id": run_id,
+                    "claim_id": claim_id,
+                    "token": claim_token(conn, run_id),
+                    "signoff": signoff,
+                    "seconds": company["agent_run_timeout_seconds"],
+                }
+            )
+    return handed
+
+
+@router.post("/agent/resumable", operation_id="claim_waiting_runs")
+def claim_waiting_runs(_who: auth.Who) -> list[dict[str, Any]]:
+    """Hand the agent's service every run to carry on, with its token."""
+    return hand_over()
+
+
+@router.post("/runs/{run_id}/steps", operation_id="record_run_step")
+def record_run_step(run_id: str, body: Step, _who: auth.Who) -> dict[str, str]:
+    """Add one step to a claim run's trace."""
+    record(run_id, body.model_dump())
+    return {"run_id": run_id}
+
+
+@router.post("/runs/{run_id}/end", operation_id="end_claim_run")
+def end_claim_run(run_id: str, body: RunEnd, who: auth.Who) -> dict[str, Any]:
+    """End a claim run that the agent's service carried on."""
+    finish(run_id, who.claim_id, body.error, body.failure or "error")
+    with db.connect() as conn:
+        return run_view(conn, run_id, who.tenant_id)
 
 
 def run_view(conn: Any, run_id: str, tenant_id: str) -> dict[str, Any]:
