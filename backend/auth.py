@@ -31,6 +31,7 @@ SESSION_COOKIE = "cc_session"
 CSRF_COOKIE = "cc_csrf"
 CSRF_HEADER = "x-csrf-token"
 SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+SEEN_EVERY = timedelta(minutes=1)
 SCRYPT_N = 2**14
 SCRYPT_R = 8
 SCRYPT_P = 1
@@ -52,6 +53,10 @@ class Principal:
     roles: frozenset[str] = field(default_factory=frozenset)
     run_id: str = ""
     claim_id: str = ""
+    # A claim token's claim, read with the token, so each call checks its
+    # binding without another query. Empty if the claim is gone.
+    policy_id: str = ""
+    customer_id: str = ""
 
     @property
     def agent(self) -> bool:
@@ -169,18 +174,28 @@ def create_session(conn: db.Connection, user: db.Row) -> tuple[str, str]:
 def session_principal(
     conn: db.Connection, token: str, request: Request, cookie: bool
 ) -> Principal | None:
-    """Return the principal for a live session, refreshing when it was seen."""
-    row = conn.execute(
-        "SELECT * FROM sessions WHERE token_hash = ? AND revoked_at = ''",
+    """Return the principal for a live session, refreshing when it was seen.
+
+    The session, its user and the user's roles come back in one query, one row
+    for each role, because against a remote database every round trip counts.
+    """
+    rows = conn.execute(
+        "SELECT s.token_hash, s.user_id, s.tenant_id, s.csrf_hash, s.last_seen,"
+        " s.expires_at, u.tenant_id AS user_tenant, u.handler_id, u.name, r.role"
+        " FROM sessions s JOIN users u ON u.user_id = s.user_id"
+        " AND u.status = 'active'"
+        " LEFT JOIN user_roles r ON r.user_id = u.user_id"
+        " WHERE s.token_hash = ? AND s.revoked_at = ''",
         (digest(token),),
-    ).fetchone()
-    if row is None or past(row["expires_at"]):
+    ).fetchall()
+    if not rows:
         return None
+    row = rows[0]
+    if past(row["expires_at"]) or row["user_tenant"] != row["tenant_id"]:
+        return None
+    seen = datetime.fromisoformat(row["last_seen"])
     idle = timedelta(minutes=setting("SESSION_IDLE_MINUTES", 30))
-    if datetime.fromisoformat(row["last_seen"]) + idle <= clock.now():
-        return None
-    user = active_user(conn, row["user_id"])
-    if user is None or user["tenant_id"] != row["tenant_id"]:
+    if seen + idle <= clock.now():
         return None
     if cookie and request.method not in SAFE_METHODS:
         sent = request.headers.get(CSRF_HEADER, "")
@@ -195,11 +210,23 @@ def session_principal(
                 ip(request),
             )
             raise HTTPException(403, "The request is missing its CSRF token.")
-    conn.execute(
-        "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
-        (clock.stamp(), row["token_hash"]),
+    # Refreshed at most once a minute: the idle limit is in minutes, and a
+    # write on every call would cost every call a round trip.
+    if seen + SEEN_EVERY <= clock.now():
+        conn.execute(
+            "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
+            (clock.stamp(), row["token_hash"]),
+        )
+    roles = frozenset(r["role"] for r in rows if r["role"])
+    return Principal(
+        kind="user",
+        tenant_id=row["tenant_id"],
+        operations=permissions.for_roles(roles),
+        user_id=row["user_id"],
+        handler_id=row["handler_id"],
+        name=row["name"],
+        roles=roles,
     )
-    return person(conn, user)
 
 
 def issue(  # noqa: PLR0913, PLR0917 - a token's binding, one argument each
@@ -259,7 +286,9 @@ def revoke_token(conn: db.Connection, token: str) -> None:
 def service_principal(conn: db.Connection, token: str) -> Principal | None:
     """Return the principal for a live service token."""
     row = conn.execute(
-        "SELECT * FROM service_tokens WHERE token_hash = ? AND revoked_at = ''",
+        "SELECT t.*, c.policy_id, c.customer_id FROM service_tokens t"
+        " LEFT JOIN claims c ON c.claim_id = t.claim_id AND c.tenant_id = t.tenant_id"
+        " WHERE t.token_hash = ? AND t.revoked_at = ''",
         (digest(token),),
     ).fetchone()
     if row is None or past(row["expires_at"]):
@@ -284,6 +313,8 @@ def service_principal(conn: db.Connection, token: str) -> Principal | None:
         operations=permissions.AGENTS[row["kind"]],
         run_id=row["run_id"],
         claim_id=row["claim_id"],
+        policy_id=row["policy_id"] or "",
+        customer_id=row["customer_id"] or "",
     )
 
 
@@ -320,17 +351,12 @@ def bound(conn: db.Connection, who: Principal, request: Request) -> str:
     if "run_id" in request.query_params:
         params.setdefault("run_id", request.query_params["run_id"])
     if who.kind == "claim":
-        claim = conn.execute(
-            "SELECT policy_id, customer_id FROM claims"
-            " WHERE claim_id = ? AND tenant_id = ?",
-            (who.claim_id, who.tenant_id),
-        ).fetchone()
-        if claim is None:
+        if not who.policy_id:
             return "This run's claim is gone."
         allowed = {
             "claim_id": who.claim_id,
-            "policy_id": claim["policy_id"],
-            "customer_id": claim["customer_id"],
+            "policy_id": who.policy_id,
+            "customer_id": who.customer_id,
             "run_id": who.run_id,
         }
         for key, value in params.items():

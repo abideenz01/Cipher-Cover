@@ -95,6 +95,8 @@ After D5 (2026-11-11, fingerprint `062035d1c348`), the final measurement of `doc
 
 `evals.compare` of the medical-off run against G1 (`812783e22e15`) finds no difference outside the intervals. The median tokens a claim fell from 53,155 in G1 to 38,861. One run in each failed on the 120-second time limit (CLM-1025). Emergency medical claims: 6/6 with medical documents on. To watch: refer recall with medical documents on fell from 6/8 to 4/8 (n=8, a hint only).
 
+UnderCover's claim time limit was raised from 120 to 240 seconds on 2026-11-11, after the measurements above, because of the latency to the database. Later runs give claims more time, so a drop in time-limit failures against these runs is expected and is not an agent change.
+
 Every later measurement in `docs/PLAN_DURABLE.md` is compared with these two runs:
 
 ```bash

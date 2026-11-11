@@ -267,7 +267,7 @@ All settings live in `.env` (see [`.env.example`](.env.example)).
 | `SESSION_HOURS` | `12` | A session ends this long after sign-in, however busy |
 | `API_DOCS` | `0` | `1` serves `/docs` and `/openapi.json`, which are outside the sign-in check |
 
-The time allowed on one claim is `agent_run_timeout_seconds` (120) in `data/company.json`.
+The time allowed on one claim is `agent_run_timeout_seconds` in each tenant's `company.json` (240 seconds for UnderCover).
 
 ## Quality gates
 

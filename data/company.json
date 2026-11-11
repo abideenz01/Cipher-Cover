@@ -14,7 +14,7 @@
   },
   "document_request_window_days": 30,
   "sign_off_sla_hours": 24,
-  "agent_run_timeout_seconds": 120,
+  "agent_run_timeout_seconds": 240,
   "policy_wording_version": "2026.1",
   "claims_manual_version": "2026.2"
 }

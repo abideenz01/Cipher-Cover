@@ -248,3 +248,51 @@ def test_without_a_demo_password_each_user_gets_a_random_one(
     assert len(set(printed)) == 11
     _, response = login(password=printed[0])
     assert response.status_code == 200
+
+
+def last_seen(browser):
+    token = auth.digest(browser.cookies.get(auth.SESSION_COOKIE))
+    with db.connect() as conn:
+        return conn.execute(
+            "SELECT last_seen FROM sessions WHERE token_hash = ?", (token,)
+        ).fetchone()[0]
+
+
+def test_a_busy_session_is_marked_seen_at_most_once_a_minute(monkeypatch):
+    browser, _ = login()
+    first = last_seen(browser)
+    start = clock.now()
+    monkeypatch.setattr(clock, "now", lambda: start + timedelta(seconds=50))
+    assert browser.get("/api/auth/me").status_code == 200
+    assert last_seen(browser) == first
+    monkeypatch.setattr(clock, "now", lambda: start + timedelta(minutes=2))
+    assert browser.get("/api/auth/me").status_code == 200
+    assert last_seen(browser) == clock.stamp()
+
+
+def test_a_session_is_checked_in_one_query(monkeypatch):
+    browser, _ = login()
+    seen = []
+    real = db.Connection.execute
+
+    def counting(self, sql, *args):
+        if "sessions" in sql or "user_roles" in sql or "FROM users" in sql:
+            seen.append(sql)
+        return real(self, sql, *args)
+
+    monkeypatch.setattr(db.Connection, "execute", counting)
+    me = browser.get("/api/auth/me").json()
+    assert set(me["roles"]) == {"claims_handler", "senior_handler"}
+    assert len(seen) == 1
+
+
+def test_a_claim_token_whose_claim_is_gone_is_refused():
+    run_id = runs.begin("CLM-1001", sessions.TENANT)
+    agent = TestClient(app, headers=sessions.claim_agent(run_id))
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE claims SET tenant_id = 'T-GONE' WHERE claim_id = 'CLM-1001'"
+        )
+    response = agent.get("/api/claims/CLM-1001")
+    assert response.status_code == 403
+    assert response.json()["detail"] == "This run's claim is gone."
