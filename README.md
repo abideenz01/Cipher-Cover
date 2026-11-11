@@ -109,8 +109,8 @@ The platform was delivered the way a forward deployed engineer would deliver it 
 ### 3. Agent design: two agents, narrow tools, clear jobs
 
 - A **queue agent** with five tools: `get_run_status`, `list_waiting_claims`, `write_todos`, `work_claim` and `finish_run`.
-- A **claim agent** with eight tools: `get_claim`, `get_policy`, `get_customer_history`, `list_sections`, `read_section`, `calculate_payout`, `record_decision` and `pay_claim`.
-- Both are LangChain `create_agent` agents on OpenRouter, defaulting to **DeepSeek V4.1 Flash** with low reasoning effort. The model is configurable (`MODEL_NAME`), so cost and quality can be traded off without code changes.
+- A **claim agent** with seven tools: `get_claim`, `get_policy`, `get_customer_history`, `list_sections`, `read_section`, `calculate_payout` and `record_decision`. Once an approval is accepted, the agent's graph pays it, or waits for a handler's sign-off if the backend says one is needed. Its progress is saved after every step, so a restart carries a claim on where it stopped.
+- The queue agent is a LangChain `create_agent` agent and the claim agent a LangGraph graph, both on OpenRouter, defaulting to **DeepSeek V4.1 Flash** with low reasoning effort. The model is configurable (`MODEL_NAME`), so cost and quality can be traded off without code changes.
 - Instructions live in `backend/instructions_queue.md` and `backend/instructions_claim.md`, are served through the API, and are shown read-only in the console with a fingerprint that every run records.
 
 ### 4. The harness: guardrails, budgets and recovery
@@ -149,7 +149,7 @@ The harness makes the agent safe to run on the whole queue. The roadmap below ex
 
 | Area | What it does |
 |---|---|
-| **Claims API** | FastAPI on SQLite, seeded from `data/` on first start. Every operation has an `operation_id` and a one-line docstring, so it doubles as a clean tool surface for agents. |
+| **Claims API** | FastAPI on SQLite locally or Supabase PostgreSQL with row-level security, seeded from `data/` on first start. Every operation has an `operation_id` and a one-line docstring, so it doubles as a clean tool surface for agents. |
 | **Queue runs** | Start a run on a set number of claims or all of them. One run at a time, with a to-do list, a cap, budgets, Stop, run history and recovery on restart. |
 | **Queue agent** | Plans the run, hands each claim to a fresh claim agent, and writes a summary. It cannot decide or pay. |
 | **Claim agent** | Eight tools over the API, section-by-section reading of the wording and manual, retries, and step and time limits. |
@@ -158,7 +158,7 @@ The harness makes the agent safe to run on the whole queue. The roadmap below ex
 | **Sign-off** | Handler sign-off and send-back for large payouts, restricted to authorised handlers, with SLA tracking. |
 | **Live trace** | Each step is recorded and shown in the claim drawer, grouped by attempt with tokens, time and sections read. |
 | **Console** | Run control and run panel, queue board, metric strip, claim drawer, Instructions view with fingerprint, `/` to search, dark and light themes. |
-| **Voice** | Optional hands-free mode: talk to a voice agent with nine tools, with captions, consent notice and rate limiting. A voice request never pays a claim; only a handler's click does. |
+| **Voice** | Optional hands-free mode: talk to a voice agent with nine tools, with captions, consent notice and rate limiting. A voice request never signs off a claim; only a handler's click does. |
 
 ## Architecture
 
@@ -166,7 +166,9 @@ The harness makes the agent safe to run on the whole queue. The roadmap below ex
 flowchart LR
     H([Claims handler]) -->|browser| D[Dashboard<br/>React + Vite]
     D -->|REST /api| B[Backend<br/>FastAPI]
-    B --> DB[(SQLite)]
+    B --> DB[(SQLite or Supabase)]
+    B -->|wake after sign-off| A[Agent service<br/>carries claims on]
+    A --> C
     B -->|start queue run| R[Runner<br/>background thread]
     R --> Q[Queue agent<br/>to-do list]
     Q -->|work_claim| C[Claim agent<br/>one per claim]
@@ -185,8 +187,8 @@ The agents reach claims, documents and their own instructions **only through the
 
 | Layer | Choice |
 |---|---|
-| Backend | Python 3.12, FastAPI, SQLite, uv |
-| Agents | LangChain `create_agent` with `ModelRetryMiddleware` and `ModelCallLimitMiddleware`, on OpenRouter (`deepseek/deepseek-v4.1-flash` by default, any model via `MODEL_NAME`) |
+| Backend | Python 3.12, FastAPI, SQLAlchemy Core on SQLite or Supabase PostgreSQL, uv |
+| Agents | LangChain `create_agent` (queue) and a LangGraph `StateGraph` with `PostgresSaver` (claim), an agent service on FastAPI, Langfuse tracing, on OpenRouter (`deepseek/deepseek-v4.1-flash` by default, any model via `MODEL_NAME`) |
 | Dashboard | React 19, TypeScript, Vite |
 | Testing | pytest, vitest, Testing Library, Playwright |
 | Quality | ruff, pyright, ESLint, Prettier, tsc, lefthook pre-commit hooks |
@@ -211,7 +213,7 @@ npm install             # Node dependencies, Playwright browser and git hooks
 
 cp .env.example .env    # then add your OPENROUTER_API_KEY
 
-npm run dev             # backend on :8000, dashboard on :5173
+npm run dev             # backend on :8000, dashboard on :5173, agent service on :8002
 ```
 
 Open <http://localhost:5173> and sign in, then set the number of claims in the command bar and press **Run**. The database (`undercover.db`) is created and seeded from `data/` on first start.
@@ -233,7 +235,7 @@ curl -X POST http://127.0.0.1:8000/api/runs -H "Authorization: Bearer $TOKEN"   
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Start the backend and dashboard with hot reload |
+| `npm run dev` | Start the backend, the dashboard and the agent's service |
 | `npm run check` | Run every check (Python, TypeScript and end-to-end) |
 | `npm run format` | Format Python and TypeScript |
 | `npm run e2e` | Playwright end-to-end tests only |

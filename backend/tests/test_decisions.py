@@ -246,3 +246,20 @@ def test_acme_payout_over_its_own_750_limit_needs_sign_off():
     ).json()
     assert 750 < result["payout"] < 1000
     assert result["needs_sign_off"] is True
+
+
+def test_the_queue_shows_each_claim_as_its_own_page_does():
+    calculate("CLM-1001")
+    decide("CLM-1001", "approve", 420.0)
+    pay("CLM-1001", 420.0)
+    decide("CLM-1002", "refer", 0)
+    queue = client.get("/api/claims").json()
+    for listed in queue:
+        claim = client.get(f"/api/claims/{listed['claim_id']}").json()
+        assert listed == {k: claim[k] for k in listed}
+    shown = {c["claim_id"]: c for c in queue}
+    assert (shown["CLM-1001"]["paid"], shown["CLM-1001"]["decision"]) == (
+        420.0,
+        "approve",
+    )
+    assert (shown["CLM-1002"]["paid"], shown["CLM-1002"]["decision"]) == (0.0, "refer")

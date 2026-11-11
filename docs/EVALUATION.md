@@ -86,6 +86,15 @@ The six emergency medical claims: decision correct 3/6 with medical documents of
 
 After D2 (2026-11-11, `022d27c3cfa4`, medical off, fingerprint `9d599a9f5eb1`, $0.20): the payout rules moved into `calculate_payout`. Decisions 30/35 and payouts 28/35, the same as G1; decision and payout 28/35 (G1 27/35); refer recall 8/8 (G1 7/8). Three runs failed on the 120-second time limit (CLM-1003, CLM-1403, CLM-1404, all with medical documents), against none in G1. `evals.compare` finds no difference outside the intervals. The scripted figures above did not move, because the scripted model's lines meet the same limits as before.
 
+After D5 (2026-11-11, fingerprint `062035d1c348`), the final measurement of `docs/PLAN_DURABLE.md`: the claim agent is a LangGraph graph that pays after an accepted approval, and `pay_claim` is no longer its tool. A claim that waits for sign-off counts as a run that succeeded.
+
+| Run | Medical documents | Decision correct | Payout exact | Decision and payout | Cites every expected section | Refer recall | Over limit waits | Median tokens a claim |
+|---|---|---|---|---|---|---|---|---|
+| `589fcf322cf2` | off (production) | 29/35 (82.9%, 95% CI 67.3 to 91.9) | 29/35 (82.9%) | 28/35 | 30/35 | 6/8 | 8/8 | 38,861 |
+| `8102ded19bee` | on | 30/35 (85.7%, 95% CI 70.6 to 93.7) | 29/35 (82.9%) | 27/35 | 29/35 | 4/8 | 6/6 | 40,504 |
+
+`evals.compare` of the medical-off run against G1 (`812783e22e15`) finds no difference outside the intervals. The median tokens a claim fell from 53,155 in G1 to 38,861. One run in each failed on the 120-second time limit (CLM-1025). Emergency medical claims: 6/6 with medical documents on. To watch: refer recall with medical documents on fell from 6/8 to 4/8 (n=8, a hint only).
+
 Every later measurement in `docs/PLAN_DURABLE.md` is compared with these two runs:
 
 ```bash

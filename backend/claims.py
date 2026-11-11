@@ -26,9 +26,20 @@ def withheld(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def summary(conn: db.Connection, row: db.Row, who: auth.Principal) -> dict[str, Any]:
     """Return one claim as it appears in the queue. Agents see a short name only."""
+    return view(
+        row,
+        who,
+        store.customer_name(conn, row["customer_id"], row["tenant_id"]),
+        store.latest_decision(conn, row["claim_id"]),
+        store.paid_cents(conn, row["claim_id"]),
+    )
+
+
+def view(
+    row: db.Row, who: auth.Principal, name: str, latest: db.Row | None, paid: int
+) -> dict[str, Any]:
+    """Shape a claim for the queue from its row and what was looked up for it."""
     data = json.loads(row["data"])
-    name = store.customer_name(conn, row["customer_id"], row["tenant_id"])
-    latest = store.latest_decision(conn, row["claim_id"])
     return {
         "claim_id": row["claim_id"],
         "policy_id": row["policy_id"],
@@ -44,7 +55,7 @@ def summary(conn: db.Connection, row: db.Row, who: auth.Principal) -> dict[str, 
         "left_for_handler": row["failed_attempts"] >= store.FAILURES_FOR_HANDLER,
         "decision": latest["decision"] if latest else "",
         "payout": db.dollars(latest["payout_cents"]) if latest else 0.0,
-        "paid": db.dollars(store.paid_cents(conn, row["claim_id"])),
+        "paid": db.dollars(paid),
     }
 
 
@@ -52,11 +63,44 @@ def summary(conn: db.Connection, row: db.Row, who: auth.Principal) -> dict[str, 
 def list_claims(who: auth.Who) -> list[dict[str, Any]]:
     """List the queue with each claim's state and latest decision."""
     with db.connect() as conn:
+        # Four queries for the whole queue, not three for each claim: against a
+        # remote database every round trip counts.
+        tenant = (who.tenant_id,)
         rows = conn.execute(
-            "SELECT * FROM claims WHERE tenant_id = ? ORDER BY claim_id",
-            (who.tenant_id,),
+            "SELECT * FROM claims WHERE tenant_id = ? ORDER BY claim_id", tenant
         ).fetchall()
-        return [summary(conn, row, who) for row in rows]
+        names = {
+            c["customer_id"]: c["name"]
+            for c in conn.execute(
+                "SELECT customer_id, name FROM customers WHERE tenant_id = ?", tenant
+            ).fetchall()
+        }
+        latest = {
+            d["claim_id"]: d
+            for d in conn.execute(
+                "SELECT * FROM decisions WHERE id IN (SELECT MAX(id)"
+                " FROM decisions WHERE tenant_id = ? GROUP BY claim_id)",
+                tenant,
+            ).fetchall()
+        }
+        paid = {
+            p["claim_id"]: p["cents"]
+            for p in conn.execute(
+                "SELECT claim_id, SUM(amount_cents) AS cents FROM payments"
+                " WHERE tenant_id = ? GROUP BY claim_id",
+                tenant,
+            ).fetchall()
+        }
+        return [
+            view(
+                row,
+                who,
+                names[row["customer_id"]],
+                latest.get(row["claim_id"]),
+                paid.get(row["claim_id"], 0),
+            )
+            for row in rows
+        ]
 
 
 @router.get("/claims/{claim_id}", operation_id="get_claim")

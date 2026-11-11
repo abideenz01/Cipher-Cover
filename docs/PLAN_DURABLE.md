@@ -82,19 +82,19 @@ Success criteria (done 2026-11-11):
 - Progress is saved after every step by the synchronous `PostgresSaver` (`durability="sync"`) in the `undercover` schema, sharing the 4-connection limit. Tests use `InMemorySaver`.
 - `pay_claim` is no longer one of the agent's tools, and the instructions change to match. The backend operation stays, for the pay step.
 - Backend changes, each in the module that does it today:
-  - **Migration `m0007`:** `runs` get `thread_id` and the states `paused` and `interrupted`.
+  - **No migration for runs:** a run's thread is its own `run_id`, and `paused` and `interrupted` are new values of the existing `status` text. (The migration that was needed is `m0007_signed_off_payments`, in D6: payments get `signed_off_by` and `signed_off_at`.)
   - **`queue_runs.recover()`:** a claim stopped partway with a checkpoint is marked `interrupted`, with no new attempt and its claim kept. A claim that failed with an error goes back to waiting with an attempt counted, as today.
   - **`auth.py`:** issues a new claim token for the same run and thread when a claim resumes.
   - **`record_decision` and `pay_claim`:** a repeat of what is already recorded returns the claim. A different decision is still a 409.
   - **The queue:** a stopped queue run is finished by the next one.
 
 Success criteria (stub model, no network):
-- [ ] A claim over the limit stops at the interrupt, with its state saved and the claim waiting for sign-off.
-- [ ] A claim stopped after its first steps carries on from its last step on the same thread, with `failed_attempts` unchanged and one decision.
-- [ ] A claim that raises an error goes back to waiting and starts again from scratch.
-- [ ] A repeated decision or payment returns the claim. A different decision returns 409. No claim ever has two decisions or two payments.
-- [ ] The 30-call cap and the step-by-step trace behave as before (the existing tests, adapted only where `create_agent` is named).
-- [ ] The real-model runs (gate off and on) are compared with G1. This is the final measurement.
+- [x] A claim over the limit stops at the interrupt, with its state saved and the claim waiting for sign-off.
+- [x] A claim stopped after its first steps carries on from its last step on the same thread, with `failed_attempts` unchanged and one decision.
+- [x] A claim that raises an error goes back to waiting and starts again from scratch.
+- [x] A repeated decision or payment returns the claim. A different decision returns 409. No claim ever has two decisions or two payments.
+- [x] The 30-call cap and the step-by-step trace behave as before (the existing tests, adapted only where `create_agent` is named).
+- [x] The real-model runs (gate off and on) are compared with G1. This is the final measurement: `589fcf322cf2` (off) and `8102ded19bee` (on), no difference outside the intervals (see `docs/EVALUATION.md`).
 
 ## Phase D6: the agent's service and resuming on sign-off
 
@@ -106,22 +106,22 @@ Success criteria (stub model, no network):
 - `docs/CODE_STANDARDS.md` gets the service as the agent's fourth part, with the graph's nodes in place of the middleware.
 
 Success criteria:
-- [ ] A Python test: a sign-off resumes the claim and pays it once, and the payment records the handler and the time.
-- [ ] A Python test: a sign-off while the service is down stands, and the next run pays the claim.
-- [ ] An end-to-end test: a sign-off on the dashboard reaches a stand-in service on port 8003, never the one on port 8002.
-- [ ] A test: the backend still refuses a payout over the limit without a sign-off, whatever the agent sends.
+- [x] A Python test: a sign-off resumes the claim and pays it once, and the payment records the handler and the time.
+- [x] A Python test: a sign-off while the service is down stands, and the next run pays the claim.
+- [x] An end-to-end test: a sign-off on the dashboard reaches a stand-in service on port 8003, never the one on port 8002.
+- [x] A test: the backend still refuses a payout over the limit without a sign-off, whatever the agent sends.
 
 ## Phase D7: live checks and the docs
 
 After reseeding Supabase, on the default model:
-- [ ] A run capped at five claims works all five. A claim over the limit waits for sign-off.
-- [ ] Signed off on the dashboard through the Playwright MCP server, that claim shows as paid within five seconds, with the handler and the time.
-- [ ] A run killed after a claim's first steps carries on with the same thread next time, with attempts unchanged and one decision.
-- [ ] During the run, `pg_stat_activity` through the Supabase MCP server shows no more than 12 connections, counting the postgres user and the application role.
-- [ ] Langfuse's API shows the held claim's session with traces from before and after the sign-off.
-- [ ] The spend for the whole plan is recorded and is within $1.50.
-- [ ] `docs/SPEC.md` (its section on working the queue only), `docs/TECH_STACK.md`, `docs/PROCESS.md`, `docs/CODE_STANDARDS.md` and `docs/STATUS.md` describe the product as it now is.
-- [ ] `npm run check` is green with `.env` moved away.
+- [x] A run capped at five claims works all five. A claim over the limit waits for sign-off. Queue run `953dded6…`: all five worked, ended `succeeded` at its cap in 1,089 s with 382,795 tokens; CLM-1001, 1004 and 1005 paid once each; CLM-1002 and CLM-1003 hit the 120-second claim time limit twice and were left for a handler. No claim in that run reached a sign-off, so the held claims were named runs on CLM-1011 ($1,150.00) and CLM-1008 ($2,240.00), both of which waited for sign-off.
+- [ ] Signed off on the dashboard (a Playwright script; no Playwright MCP server here), that claim shows as paid within five seconds, with the handler and the time. **Not met from this machine:** CLM-1008 was paid 13 s after the sign-off was saved (19.6 s from the click), CLM-1011 9 s; the drawer then shows "Paid $2,240.00 at 17:19, signed off by Dana Whitfield at 17:19". The cause is the round trips to the database in Seoul (about 230 ms each); see `docs/STATUS.md`.
+- [x] A run killed after a claim's first steps carries on with the same thread next time, with attempts unchanged and one decision. CLM-1011, run `582365ad…`: every process was killed during its section reads (7 checkpoints, 24 steps). On restart the service carried it on in the same thread: the pending reads ran once, nothing earlier was repeated, attempt 1, `failed_attempts` 0, one decision, then it waited for sign-off.
+- [x] During the run, `pg_stat_activity` shows no more than 12 connections, counting the postgres user and the application role: peak 6 (including Supabase's own `pg_net`) over 205 samples in 34 minutes; 7 through the Supabase MCP server with the stack idle afterwards.
+- [x] Langfuse's API shows the held claim's session with traces from before and after the sign-off. `CLM-1011:582365ad…` has three traces: 12:03:35 to 12:04:21 (before the kill), 12:05:14 to 12:07:18 (after the restart, up to the decision) and 12:08:11 (the pay step after the sign-off).
+- [x] The spend for the whole plan is recorded and is within $1.50: $0.91.
+- [x] `docs/SPEC.md` (its section on working the queue only), `docs/TECH_STACK.md`, `docs/PROCESS.md`, `docs/CODE_STANDARDS.md` and `docs/STATUS.md` describe the product as it now is (and `docs/ARCHITECTURE.md`).
+- [x] `npm run check` is green with `.env` moved away: Python 343 passed and 9 skipped (the opt-in Postgres tests) at 96.6%, TypeScript 44 passed, Playwright 16 of 16.
 
 ## Set up for the production phases that follow
 

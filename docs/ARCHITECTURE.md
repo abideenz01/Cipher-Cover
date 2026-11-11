@@ -1,6 +1,6 @@
 # Architecture
 
-Cipher Cover has three parts: a FastAPI backend that owns the data and every business rule, a claim agent that decides claims through the backend's API, and a React console for claims handlers.
+Cipher Cover has four parts: a FastAPI backend that owns the data and every business rule, a claim agent (a durable LangGraph graph) that decides claims through the backend's API, the agent's service that picks claims back up after a sign-off or a restart, and a React console for claims handlers. The database is SQLite for tests and local work, and PostgreSQL on Supabase with row-level security when `DATABASE_URL` is set.
 
 ## Components
 
@@ -19,8 +19,9 @@ flowchart TB
         VR[voice/routes.py]
     end
 
-    DB[(SQLite)]
-    A[Claim agent<br/>agent/main.py]
+    DB[(SQLite or Supabase)]
+    A[Claim agent<br/>agent/main.py + graph.py]
+    S[Agent service<br/>agent/service.py]
     VA[Voice agent<br/>agent/voice.py]
     LLM[(OpenRouter)]
 
@@ -32,6 +33,8 @@ flowchart TB
     API --> SO
     API --> RN
     RN --> A
+    SO -->|wake| S
+    S --> A
     VR --> VA
     A -->|HTTP tools| API
     VA -->|tools| API
@@ -41,8 +44,9 @@ flowchart TB
 
 | Part | Path | Responsibility |
 |---|---|---|
-| Backend | `backend/` | Data, business rules, permissions and PII filtering. Seeds SQLite from `data/` on startup. |
-| Claim agent | `agent/main.py` | `run(claim_id, thread_id, llm=None, on_step=None)`: reads the claim, decides, calculates and pays through six tools. |
+| Backend | `backend/` | Data, business rules, permissions and PII filtering. Seeds the database from `data/` on startup. |
+| Claim agent | `agent/main.py`, `agent/graph.py` | `run(claim_id, thread_id, llm=None, on_step=None)`: reads the claim, calculates and decides through its tools; after an accepted approval the graph pays, waiting with `interrupt()` for a sign-off if the backend says one is needed. Progress is saved after every step. |
+| Agent service | `agent/service.py` | Woken by the backend after a sign-off or a restart; carries on every claim that is due, under that run's token. |
 | Voice agent | `agent/voice.py` | `run_turn(session_id, handler_id, text, llm=None, token="")`: answers spoken questions with nine tools, under a voice token for the signed-in handler. |
 | Dashboard | `dashboard/` | The handlers' console: queue, sign-off, instructions, trace and voice. |
 | Context | `context/` | Policy wording, claim rules, glossary and data dictionary. |
@@ -104,7 +108,7 @@ sequenceDiagram
 - A claim token ends with its run, and every agent token ends when the backend restarts.
 - `backend/accounts.py` lets a tenant admin add sign-ins, change roles, turn sign-ins off and on, and set whether medical documents may go to the model, all within their own tenant.
 - `security_events` records sign-ins, sign-outs, refusals, CSRF failures, sign-offs, send-backs, sign-off requests and tokens issued.
-- Every business table has a `tenant_id`, and every query filters by the caller's tenant. This is application-level isolation on SQLite, for development and pilots. Production with more than one tenant needs PostgreSQL with row-level security first (`docs/ADR_POSTGRES.md`).
+- Every business table has a `tenant_id`, and every query filters by the caller's tenant. On PostgreSQL, row-level security enforces the same isolation in the database: each signed-in request runs as `undercover_app` with its tenant set (`docs/ADR_POSTGRES.md`).
 - `get_claim` replaces the text of medical records and medical bills for agents unless the tenant's config sets `external_model_medical`. Agents see a customer's first name and last initial only. Traveler names on a policy still reach the model, because coverage depends on them.
 
 ## Design decisions

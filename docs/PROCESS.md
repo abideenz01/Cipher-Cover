@@ -1,6 +1,6 @@
 # Process
 
-`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend and the dashboard.
+`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts three processes: the backend (port 8000), the dashboard (5173) and the agent's service (8002). The backend and the service read `.env` without replacing settings they were started with, and share `AGENT_SERVICE_KEY` (from `.env`, or a fresh one each session). With `DATABASE_URL` set they use Supabase; reseed it with `uv run --env-file .env -m backend.seed --reset`.
 
 `npm run check` runs every check:
 
@@ -9,6 +9,8 @@
 - Playwright end-to-end tests
 
 The pre-commit hook runs the format, lint, type and unit test checks on every commit.
+
+The checks never touch Supabase, Langfuse or a model: the tests clear `DATABASE_URL` and the Langfuse keys. Tests against PostgreSQL are opt-in: `TEST_DATABASE_URL=... uv run pytest -m postgres` runs them in an `undercover_test` schema that is dropped afterwards.
 
 ## Planning
 
