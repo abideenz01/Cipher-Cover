@@ -16,6 +16,7 @@ from backend.migrations import (
     m0003_auth,
     m0004_tenant_settings,
     m0005_run_order,
+    m0006_rls,
 )
 from backend.migrations.schema import SchemaMismatch
 
@@ -27,6 +28,7 @@ MIGRATIONS: list[ModuleType] = [
     m0003_auth,
     m0004_tenant_settings,
     m0005_run_order,
+    m0006_rls,
 ]
 
 
@@ -44,7 +46,7 @@ def head() -> int:
 def apply(conn: db.Connection) -> list[int]:
     """Apply every pending migration and return the versions applied now."""
     if conn.dialect == "postgresql":
-        conn.execute(f"CREATE SCHEMA IF NOT EXISTS {db.SCHEMA_NAME}")
+        conn.execute(f"CREATE SCHEMA IF NOT EXISTS {db.schema()}")
     else:
         # SQLite only puts DDL in a transaction that was begun by hand.
         conn.execute("BEGIN")

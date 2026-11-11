@@ -7,8 +7,13 @@ from backend.voice import routes
 
 
 @pytest.fixture(autouse=True)
-def database(tmp_path, monkeypatch):
-    """Give every test a freshly seeded database with a session for each user."""
+def database(request, tmp_path, monkeypatch):
+    """Give every test a freshly seeded database with a session for each user.
+
+    Tests marked postgres bring their own database (backend/tests/test_postgres.py).
+    """
+    if request.node.get_closest_marker("postgres"):
+        return
     monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
     # Tests run on SQLite, even with a developer's .env loaded.
     monkeypatch.delenv("DATABASE_URL", raising=False)

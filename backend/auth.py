@@ -376,6 +376,15 @@ def guard(request: Request) -> Principal | None:
     return who
 
 
+async def scope(found: Annotated[Principal | None, Depends(guard)]) -> None:
+    """Hold the caller's tenant for the request, so its queries run under RLS.
+
+    It is async so the value is set in the request's own context, which the
+    route's thread then inherits.
+    """
+    db.TENANT.set(found.tenant_id if found else "")
+
+
 def current(found: Annotated[Principal | None, Depends(guard)]) -> Principal:
     """Return the caller of a route that is not public."""
     if found is None:

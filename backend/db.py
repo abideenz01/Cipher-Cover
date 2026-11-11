@@ -1,15 +1,22 @@
 """The database: SQLite by default, PostgreSQL (Supabase) when DATABASE_URL is set.
 
 Every query is written once, with `?` placeholders, and runs on both through
-SQLAlchemy Core. On PostgreSQL all tables live in the `undercover` schema, set as
-the search path on each connection, and each process holds at most four
-connections, because Supabase's session pooler allows 15 in all.
+SQLAlchemy Core. On PostgreSQL all tables live in one schema (`undercover`, or
+DATABASE_SCHEMA), set as the search path on each connection, and each process
+holds at most four connections, because Supabase's session pooler allows 15 in
+all.
+
+On PostgreSQL, a connection opened while serving a signed-in request works as
+the application role, under row-level security for the caller's tenant
+(migration 0006). Work with no caller (startup, sign-in, the agent's
+background threads) uses the owner's connection.
 """
 
 import json
 import os
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from contextvars import ContextVar
 from decimal import Decimal
 from functools import cache
 from typing import Any
@@ -18,8 +25,12 @@ import sqlalchemy as sa
 from sqlalchemy import event
 from sqlalchemy.pool import NullPool
 
-SCHEMA_NAME = "undercover"
+APP_ROLE = "undercover_app"
 POOL_SIZE = 4
+
+# The tenant of the signed-in caller of the request being served, set by
+# auth.scope. Empty outside a request.
+TENANT: ContextVar[str] = ContextVar("tenant", default="")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reference (name TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -191,6 +202,11 @@ def url() -> str:
     return os.getenv("DATABASE_URL") or ""
 
 
+def schema() -> str:
+    """Return the PostgreSQL schema that holds the tables."""
+    return os.getenv("DATABASE_SCHEMA") or "undercover"
+
+
 def postgres() -> bool:
     """Say whether the backend uses PostgreSQL."""
     return bool(url())
@@ -198,7 +214,7 @@ def postgres() -> bool:
 
 def engine() -> sa.Engine:
     """Return the engine for the database this process uses."""
-    return postgres_engine(url()) if postgres() else sqlite_engine(path())
+    return postgres_engine(url(), schema()) if postgres() else sqlite_engine(path())
 
 
 @cache
@@ -219,7 +235,7 @@ def sqlite_engine(file: str) -> sa.Engine:
 
 
 @cache
-def postgres_engine(conninfo: str) -> sa.Engine:
+def postgres_engine(conninfo: str, search_path: str) -> sa.Engine:
     """Open PostgreSQL through psycopg, at most POOL_SIZE connections, in our schema."""
     made = sa.create_engine(
         conninfo.replace("postgresql://", "postgresql+psycopg://", 1),
@@ -232,7 +248,7 @@ def postgres_engine(conninfo: str) -> sa.Engine:
     @event.listens_for(made, "connect")
     def setup(dbapi: Any, _record: Any) -> None:
         with dbapi.cursor() as cursor:
-            cursor.execute(f"SET search_path TO {SCHEMA_NAME}")
+            cursor.execute(f"SET search_path TO {search_path}")
         dbapi.commit()
 
     return made
@@ -246,6 +262,12 @@ def connect() -> Iterator[Connection]:
     """
     with engine().connect() as conn:
         wrapped = Connection(conn)
+        if wrapped.dialect == "postgresql" and TENANT.get():
+            wrapped.execute(
+                "SELECT set_config('role', ?, true),"
+                " set_config('app.tenant_id', ?, true)",
+                (APP_ROLE, TENANT.get()),
+            )
         try:
             yield wrapped
         except BaseException:

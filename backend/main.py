@@ -35,7 +35,7 @@ DOCS = os.getenv("API_DOCS") == "1"
 app = FastAPI(
     title="UnderCover",
     lifespan=lifespan,
-    dependencies=[Depends(auth.guard)],
+    dependencies=[Depends(auth.guard), Depends(auth.scope)],
     openapi_url="/openapi.json" if DOCS else None,
 )
 app.include_router(auth.router)

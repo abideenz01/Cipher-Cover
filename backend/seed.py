@@ -199,7 +199,7 @@ def clear() -> None:
     """Remove every table: the SQLite file, or the whole schema on PostgreSQL."""
     if db.postgres():
         with db.connect() as conn:
-            conn.execute(f"DROP SCHEMA IF EXISTS {db.SCHEMA_NAME} CASCADE")
+            conn.execute(f"DROP SCHEMA IF EXISTS {db.schema()} CASCADE")
         return
     for suffix in ("", "-wal", "-shm"):
         Path(db.path() + suffix).unlink(missing_ok=True)
