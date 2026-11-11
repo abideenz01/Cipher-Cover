@@ -31,7 +31,9 @@ Success criteria (done 2026-11-11):
 
 ## Gate G1: the real-model baseline
 
-- [ ] `uv run -m evals.run --set queue --model real --medical off` and `--medical on` are run and stored in `evals.db`, and the figures and the instructions fingerprint go into `docs/EVALUATION.md`.
+Done 2026-11-11: `812783e22e15` (medical off) and `6158f1b36985` (medical on), $0.30 in all. Figures in `docs/EVALUATION.md`.
+
+- [x] `uv run -m evals.run --set queue --model real --medical off` and `--medical on` are run and stored in `evals.db`, and the figures and the instructions fingerprint go into `docs/EVALUATION.md`.
 
 ## Phase D2: the payout rules from the manual
 

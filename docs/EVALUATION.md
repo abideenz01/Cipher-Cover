@@ -73,17 +73,23 @@ Run on 2026-11-03 with instructions fingerprint `1c8b2cef2c28`, set version 2026
 | even_harder | 25/25 | 17/25 | 5/25 | 16/25 | 0/2 | 9/9 |
 | security | 3/3 | 1/3 | 1/3 | 1/3 | 0/0 | 1/1 |
 
-## Baseline: the real model
+## Baseline: the real model (G1)
 
-Not run yet, because it costs money. These are the runs to make before any change to the agent's instructions or tools, and before choosing how the instructions treat a withheld medical document:
+Run on 2026-11-11, before any change to the agent's tools or instructions, on the queue set (v2026.11, 35 claims) with `deepseek/deepseek-v4.1-flash`, instructions fingerprint `1c8b2cef2c28`. The two runs together cost $0.30 of OpenRouter credit. The labels are synthetic and from one handler each, so these are rates on 35 claims, not significance tests; slices under 30 are flagged in the reports.
+
+| Run | Medical documents | Decision correct | Payout exact | Decision and payout | Cites every expected section | Refer recall | Over limit waits | Median tokens a claim |
+|---|---|---|---|---|---|---|---|---|
+| `812783e22e15` | off (production) | 30/35 (85.7%, 95% CI 70.6 to 93.7) | 28/35 (80.0%) | 27/35 | 29/35 | 7/8 | 8/8 | 53,155 |
+| `6158f1b36985` | on | 31/35 (88.6%, 95% CI 74.0 to 95.5) | 30/35 (85.7%) | 30/35 | 32/35 | 6/8 | 6/6 | |
+
+The six emergency medical claims: decision correct 3/6 with medical documents off and 5/6 with them on. With n=6 this is a hint, not a finding. It is consistent with the risk in `docs/PLAN_PRODUCTION.md` section E that the medical gate costs accuracy on these claims; the instruction wording for a withheld medical document is still to be decided on that evidence.
+
+Every later measurement in `docs/PLAN_DURABLE.md` is compared with these two runs:
 
 ```bash
-uv run -m evals.run --set queue --model real                  # medical off, as in production
-uv run -m evals.run --set queue --model real --medical on
-uv run -m evals.compare OFF_ID ON_ID
+uv run --env-file .env -m evals.run --set queue --model real --medical off
+uv run -m evals.compare 812783e22e15 AFTER_ID
 ```
-
-Look at the `medical_documents: yes` slice (6 claims in the queue). With n=6, only a large difference means anything, so read the six claims' results in `eval_results` one by one, as well as the rates.
 
 ## Using it for a change
 

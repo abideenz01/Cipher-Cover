@@ -75,7 +75,7 @@ The durable-agent plan is in `docs/PLAN_DURABLE.md` (brief: `docs/DURABLE.md`). 
 | Durable phase | State |
 |---|---|
 | D1 Tracing in Langfuse | Done 2026-11-11. Python 294 passed at 98.2%, TypeScript 42, Playwright 16 of 16 |
-| G1 Real-model baseline | Not started |
+| G1 Real-model baseline | Done 2026-11-11. Decisions 30/35 (medical off) and 31/35 (on); $0.30 |
 | D2 Payout rules from the manual | Not started |
 | D3 Supabase as the database | Not started |
 | D4 Row-level security | Not started |
@@ -83,7 +83,8 @@ The durable-agent plan is in `docs/PLAN_DURABLE.md` (brief: `docs/DURABLE.md`). 
 | D6 Agent service and sign-off resume | Not started |
 | D7 Live checks and docs | Not started |
 
-- 2026-11-11, D1: `agent/tracing.py` sends each claim's work to Langfuse when the three `LANGFUSE_*` settings are set, as one session named `<claim_id>:<thread_id>`, a new trace per run; the queue agent's run is the session `queue:<run_id>`. Langfuse gets what the model gets: medical documents stay withheld by the backend, contact details are never returned, and a mask replaces email addresses. Without the settings nothing is sent, which is how the tests run. Checked live: `auth_check()` passed, and one claim on `openrouter/free` (47,808 tokens, $0) appeared as one session with one trace of 65 observations (9 model calls, 14 tool calls). This Langfuse organization cannot use the legacy `GET /api/public/traces`; sessions are read through `GET /api/public/v2/observations`. Spend so far: $0.00.
+- 2026-11-11, D1: `agent/tracing.py` sends each claim's work to Langfuse when the three `LANGFUSE_*` settings are set, as one session named `<claim_id>:<thread_id>`, a new trace per run; the queue agent's run is the session `queue:<run_id>`. Langfuse gets what the model gets: medical documents stay withheld by the backend, contact details are never returned, and a mask replaces email addresses. Without the settings nothing is sent, which is how the tests run. Checked live: `auth_check()` passed, and one claim on `openrouter/free` (47,808 tokens, $0) appeared as one session with one trace of 65 observations (9 model calls, 14 tool calls). This Langfuse organization cannot use the legacy `GET /api/public/traces`; sessions are read through `GET /api/public/v2/observations`.
+- 2026-11-11, G1: the real-model baseline, before any change to the agent. Queue set, `deepseek/deepseek-v4.1-flash`, fingerprint `1c8b2cef2c28`. Medical off (`812783e22e15`): decisions 30/35, payouts 28/35, over-limit approvals waiting 8/8. Medical on (`6158f1b36985`): decisions 31/35, payouts 30/35. The six emergency medical claims went 3/6 with medical documents off and 5/6 with them on (n=6, a hint only). Spend so far: $0.30 of the $1.50.
 
 The harness plan is in `docs/PLAN_HARNESS.md`.
 
