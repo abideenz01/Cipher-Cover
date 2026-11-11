@@ -10,7 +10,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from agent import main
-from backend import auth, clock, db, decisions, runner, store
+from backend import auth, clock, db, decisions, runner, store, trace
+from backend.trace import tenant_of
 
 router = APIRouter(prefix="/api")
 
@@ -71,45 +72,14 @@ def claim_token(conn: db.Connection, run_id: str) -> str:
     )
 
 
-def tenant_of(conn: db.Connection, run_id: str) -> str:
-    """Return the tenant of a claim run or a queue run."""
-    row = conn.execute(
-        "SELECT tenant_id FROM runs WHERE run_id = ?"
-        " UNION ALL SELECT tenant_id FROM queue_runs WHERE run_id = ?",
-        (run_id, run_id),
-    ).fetchone()
-    return row["tenant_id"] if row else ""
-
-
 def record(run_id: str, step: dict[str, Any]) -> None:
-    """Store one step of a trace, or add a model call's usage to its run.
+    """Queue one step of a trace, or a model call's usage, to be saved.
 
     The run is a claim run or a queue run; both keep their steps in run_events.
+    Steps are saved in the background (backend/trace.py), so the agent doesn't
+    wait on the database; finish() saves them all before it ends a run.
     """
-    with db.connect() as conn:
-        if step["kind"] == "usage":
-            for table in ("runs", "queue_runs"):
-                conn.execute(
-                    f"UPDATE {table} SET tokens = tokens + ?,"  # noqa: S608 - fixed names
-                    " model_calls = model_calls + 1 WHERE run_id = ?",
-                    (step["detail"]["tokens"], run_id),
-                )
-            conn.execute(
-                "UPDATE runs SET model = ? WHERE run_id = ?", (step["name"], run_id)
-            )
-            return
-        conn.execute(
-            "INSERT INTO run_events (run_id, kind, name, detail, created_at,"
-            " tenant_id) VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                run_id,
-                step["kind"],
-                step["name"],
-                json.dumps(step["detail"]),
-                clock.stamp(),
-                tenant_of(conn, run_id),
-            ),
-        )
+    trace.WRITER.put(run_id, step)
 
 
 class Step(BaseModel):
@@ -164,6 +134,7 @@ def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> No
     A run whose claim waits for a sign-off is paused: it carries on, on the same
     thread, once a handler signs off.
     """
+    trace.WRITER.flush()
     with db.connect() as conn:
         auth.revoke(conn, run_id)
         tenant_id = tenant_of(conn, run_id)

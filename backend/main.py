@@ -16,6 +16,7 @@ from backend import (
     runs,
     seed,
     signoff,
+    trace,
 )
 from backend.voice import routes as voice
 
@@ -28,6 +29,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     queue_runs.recover()
     signoff.wake_agent()
     yield
+    trace.WRITER.flush()
 
 
 # The interactive docs and schema are served only with API_DOCS=1: they sit

@@ -139,16 +139,33 @@ def read_sections(conn: db.Connection, run_id: str) -> list[str]:
     return list(dict.fromkeys(r["section_id"] for r in rows))
 
 
-def run_view(conn: db.Connection, row: db.Row) -> dict[str, Any]:
-    """Return a claim run with the sections it read and how long it took."""
+def run_view(
+    conn: db.Connection, row: db.Row, read: list[str] | None = None
+) -> dict[str, Any]:
+    """Return a claim run with the sections it read and how long it took.
+
+    `read` is the run's sections when the caller has already looked them up.
+    """
     ended = row["ended_at"] or clock.stamp()
     seconds = (
         datetime.fromisoformat(ended) - datetime.fromisoformat(row["started_at"])
     ).total_seconds()
+    if read is None:
+        read = read_sections(conn, row["run_id"])
     return dict(row) | {
         "seconds": round(seconds),
-        "sections_read": [
-            {"id": s, "title": sections.title(s)}
-            for s in read_sections(conn, row["run_id"])
-        ],
+        "sections_read": [{"id": s, "title": sections.title(s)} for s in read],
     }
+
+
+def sections_by_run(conn: db.Connection, claim_id: str) -> dict[str, list[str]]:
+    """Return the sections each of a claim's runs read, in order, without repeats."""
+    rows = conn.execute(
+        "SELECT r.run_id, s.section_id FROM section_reads s"
+        " JOIN runs r ON r.run_id = s.run_id WHERE r.claim_id = ? ORDER BY s.id",
+        (claim_id,),
+    ).fetchall()
+    found: dict[str, dict[str, None]] = {}
+    for r in rows:
+        found.setdefault(r["run_id"], {})[r["section_id"]] = None
+    return {run_id: list(ids) for run_id, ids in found.items()}

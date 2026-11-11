@@ -1,7 +1,7 @@
 import pytest
 
 from agent import tracing
-from backend import auth, seed
+from backend import auth, seed, trace
 from backend.tests import sessions
 from backend.voice import routes
 
@@ -13,6 +13,7 @@ def database(request, tmp_path, monkeypatch):
     Tests marked postgres bring their own database (backend/tests/test_postgres.py).
     """
     if request.node.get_closest_marker("postgres"):
+        yield
         return
     monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
     # Tests run on SQLite, even with a developer's .env loaded.
@@ -28,3 +29,6 @@ def database(request, tmp_path, monkeypatch):
     routes.TURNS.clear()
     seed.seed()
     sessions.install()
+    yield
+    # Steps still queued must land in this test's database, not the next one's.
+    trace.WRITER.flush()

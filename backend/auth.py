@@ -13,7 +13,6 @@ it acts for. Tokens are stored only as hashes.
 
 import hashlib
 import hmac
-import json
 import os
 import secrets
 from dataclasses import dataclass, field
@@ -431,14 +430,6 @@ def current(found: Annotated[Principal | None, Depends(guard)]) -> Principal:
 
 
 Who = Annotated[Principal, Depends(current)]
-
-
-def tenant_config(conn: db.Connection, tenant_id: str) -> dict[str, Any]:
-    """Return a tenant's settings."""
-    row = conn.execute(
-        "SELECT config FROM tenants WHERE tenant_id = ?", (tenant_id,)
-    ).fetchone()
-    return json.loads(row["config"]) if row else {}
 
 
 class Login(BaseModel):

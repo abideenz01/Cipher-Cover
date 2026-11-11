@@ -24,17 +24,6 @@ def withheld(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def summary(conn: db.Connection, row: db.Row, who: auth.Principal) -> dict[str, Any]:
-    """Return one claim as it appears in the queue. Agents see a short name only."""
-    return view(
-        row,
-        who,
-        store.customer_name(conn, row["customer_id"], row["tenant_id"]),
-        store.latest_decision(conn, row["claim_id"]),
-        store.paid_cents(conn, row["claim_id"]),
-    )
-
-
 def view(
     row: db.Row, who: auth.Principal, name: str, latest: db.Row | None, paid: int
 ) -> dict[str, Any]:
@@ -107,8 +96,21 @@ def list_claims(who: auth.Who) -> list[dict[str, Any]]:
 def get_claim(claim_id: str, who: auth.Who) -> dict[str, Any]:
     """Return one claim in full, with its decisions and runs."""
     with db.connect() as conn:
-        row = store.claim_row(conn, claim_id, who.tenant_id)
-        medical = auth.tenant_config(conn, who.tenant_id).get("external_model_medical")
+        # The claim, its customer's name and the tenant's settings in one query,
+        # and the latest decision and payments from the lists below: against a
+        # remote database every round trip counts.
+        row = conn.execute(
+            "SELECT c.*, cu.name AS customer_full_name, t.config AS tenant_config"
+            " FROM claims c JOIN customers cu ON cu.customer_id = c.customer_id"
+            " AND cu.tenant_id = c.tenant_id"
+            " LEFT JOIN tenants t ON t.tenant_id = c.tenant_id"
+            " WHERE c.claim_id = ? AND c.tenant_id = ?",
+            (claim_id, who.tenant_id),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, f"There is no claim {claim_id}.")
+        config = json.loads(row["tenant_config"] or "{}")
+        medical = config.get("external_model_medical")
         data = json.loads(row["data"])
         decisions = conn.execute(
             "SELECT * FROM decisions WHERE claim_id = ? ORDER BY id", (claim_id,)
@@ -131,10 +133,13 @@ def get_claim(claim_id: str, who: auth.Who) -> dict[str, Any]:
             " FROM payments WHERE claim_id = ? ORDER BY id",
             (claim_id,),
         ).fetchall()
+        read = store.sections_by_run(conn, claim_id)
         documents = data["documents"]
         if who.agent and not medical:
             documents = withheld(documents)
-        return summary(conn, row, who) | {
+        latest = decisions[-1] if decisions else None
+        paid = sum(p["amount_cents"] for p in payments)
+        return view(row, who, row["customer_full_name"], latest, paid) | {
             "incident_date": data["incident_date"],
             "incident_location": data["incident_location"],
             "submitted_on": data["submitted_on"],
@@ -142,7 +147,7 @@ def get_claim(claim_id: str, who: auth.Who) -> dict[str, Any]:
             "items": data["items"],
             "documents": documents,
             "decisions": [store.decision_view(d) for d in decisions],
-            "runs": [store.run_view(conn, r) for r in runs],
+            "runs": [store.run_view(conn, r, read.get(r["run_id"], [])) for r in runs],
             "sendbacks": [dict(s) for s in sendbacks],
             "signoffs": [
                 {

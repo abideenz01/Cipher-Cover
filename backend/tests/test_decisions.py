@@ -263,3 +263,29 @@ def test_the_queue_shows_each_claim_as_its_own_page_does():
         "approve",
     )
     assert (shown["CLM-1002"]["paid"], shown["CLM-1002"]["decision"]) == (0.0, "refer")
+
+
+def test_a_claims_page_shows_each_runs_sections_in_few_queries(monkeypatch):
+    read("CLM-1001", "wording", 5)
+    read("CLM-1001", "manual", 9)
+    read("CLM-1001", "wording", 5)
+    first = lease("CLM-1001")
+    with db.connect() as conn:
+        conn.execute("UPDATE runs SET status = 'failed' WHERE run_id = ?", (first,))
+        conn.execute("UPDATE claims SET state = 'waiting' WHERE claim_id = 'CLM-1001'")
+    read("CLM-1001", "wording", 10)
+    counted = []
+    real = db.Connection.execute
+
+    def counting(self, sql, *args):
+        counted.append(sql)
+        return real(self, sql, *args)
+
+    monkeypatch.setattr(db.Connection, "execute", counting)
+    claim = client.get("/api/claims/CLM-1001").json()
+    shown = {r["run_id"]: [s["id"] for s in r["sections_read"]] for r in claim["runs"]}
+    assert shown[first] == ["wording-5", "manual-9"]
+    assert [ids for run, ids in shown.items() if run != first] == [["wording-10"]]
+    # The sign-in check, then the claim and its customer and settings,
+    # decisions, runs, sendbacks, sign-offs, payments and sections.
+    assert len(counted) <= 8

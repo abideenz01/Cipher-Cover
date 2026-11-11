@@ -263,6 +263,11 @@ TOOLS = [
     calculate_payout,
     record_decision,
 ]
+# Tools that only read: the graph runs a step's reads side by side.
+READS = frozenset(
+    t.name
+    for t in (get_claim, get_policy, get_customer_history, list_sections, read_section)
+)
 
 
 def model() -> ChatOpenAI:
@@ -352,6 +357,7 @@ def claim_graph(llm: BaseChatModel) -> Any:  # noqa: ANN401 - a compiled graph
         retry=retrying,
         pay=pay,
         checkpointer=checkpoints.saver(),
+        reads=READS,
     )
 
 

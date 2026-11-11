@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from agent import checkpoints, main
-from backend import auth, claims, clock, db, runner, runs, store
+from backend import auth, claims, clock, db, runner, runs, store, trace
 
 router = APIRouter(prefix="/api")
 LIVE = ("running", "stopping", "paused")
@@ -371,6 +371,7 @@ def refusal(conn: db.Connection, row: db.Row, claim_id: str) -> str:
 @router.post("/queue-runs/{run_id}/attempts", operation_id="begin_attempt")
 def begin_attempt(run_id: str, body: Attempt, who: auth.Who) -> dict[str, Any]:
     """Lease a claim for a new claim run, with the token to work it, or refuse."""
+    trace.WRITER.flush()  # the token budget counts every model call saved so far
     with db.connect() as conn:
         reason = refusal(conn, queue_row(conn, run_id, who.tenant_id), body.claim_id)
         if reason:
@@ -434,6 +435,7 @@ def finish_attempt(run_id: str, body: AttemptEnd, who: auth.Who) -> dict[str, An
 @router.post("/queue-runs/{run_id}/finish", operation_id="finish_queue_run")
 def finish_queue_run(run_id: str, body: Summary, who: auth.Who) -> dict[str, Any]:
     """Record the summary, or refuse while waiting claims within the cap remain."""
+    trace.WRITER.flush()
     with db.connect() as conn:
         row = queue_row(conn, run_id, who.tenant_id)
         if row["status"] not in LIVE:

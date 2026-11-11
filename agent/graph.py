@@ -10,6 +10,8 @@ so a stopped claim carries on from where it got to, on the same thread.
 
 import json
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.language_models import BaseChatModel
@@ -32,6 +34,8 @@ from pydantic import ValidationError
 
 Retry = Callable[[Callable[[], BaseMessage]], BaseMessage]
 Pay = Callable[[str, float], Any]
+# Reads at once: the backend has three database connections to serve them.
+PARALLEL_READS = 3
 
 
 class ClaimState(TypedDict):
@@ -88,10 +92,12 @@ class Nodes:
         limit: int,
         retry: Retry,
         pay: Pay,
+        reads: frozenset[str] = frozenset(),
     ) -> None:
         self.bound = llm.bind_tools(tools)
         self.tools = {t.name: t for t in tools}
         self.prompt, self.limit, self.retry, self.pay = prompt, limit, retry, pay
+        self.reads = reads
 
     def think(self, state: ClaimState) -> dict[str, Any]:
         """Ask the model for its next step, within the limit on model calls."""
@@ -105,11 +111,27 @@ class Nodes:
         """Run the tools the model asked for; a refusal goes back to the model."""
         message = state["messages"][-1]
         assert isinstance(message, AIMessage)  # noqa: S101 - think only routes here with tool calls
-        results = [self.use(call, config) for call in message.tool_calls]
+        results: list[ToolMessage] = []
+        for batch in batches(message.tool_calls, self.reads):
+            results += self.run(batch, config)
         update: dict[str, Any] = {"messages": results}
         if decision := accepted(message, results):
             update["decision"] = decision
         return update
+
+    def run(self, calls: list[Any], config: RunnableConfig) -> list[ToolMessage]:
+        """Run calls that only read side by side, and anything else on its own.
+
+        Each call runs in a copy of this context, which holds the run's token.
+        """
+        if len(calls) == 1:
+            return [self.use(calls[0], config)]
+        with ThreadPoolExecutor(max_workers=PARALLEL_READS) as pool:
+            futures = [
+                pool.submit(copy_context().run, self.use, call, config)
+                for call in calls
+            ]
+            return [f.result() for f in futures]
 
     def use(self, call: Any, config: RunnableConfig) -> ToolMessage:  # noqa: ANN401 - a ToolCall dict
         """Run one tool call, or say why it could not run."""
@@ -145,9 +167,10 @@ def build(  # noqa: PLR0913 - the graph's parts, each named
     retry: Retry,
     pay: Pay,
     checkpointer: BaseCheckpointSaver[str],
+    reads: frozenset[str] = frozenset(),
 ) -> CompiledStateGraph[ClaimState, None, ClaimState, ClaimState]:
-    """Build the claim agent's graph."""
-    nodes = Nodes(llm, tools, prompt, limit=limit, retry=retry, pay=pay)
+    """Build the claim agent's graph. Tools named in reads only read."""
+    nodes = Nodes(llm, tools, prompt, limit=limit, retry=retry, pay=pay, reads=reads)
     graph = StateGraph(ClaimState)
     graph.add_node("think", nodes.think)
     graph.add_node("act", nodes.act)
@@ -157,6 +180,21 @@ def build(  # noqa: PLR0913 - the graph's parts, each named
     graph.add_conditional_edges("act", after_act, ["settle", "think"])
     graph.add_edge("settle", END)
     return graph.compile(checkpointer=checkpointer)
+
+
+def batches(calls: list[Any], reads: frozenset[str]) -> list[list[Any]]:
+    """Split tool calls, in order, into runs of reads and single other calls.
+
+    Reads in a row can run side by side; a calculation or a decision runs alone
+    and in its place, after the reads before it and before the ones after.
+    """
+    out: list[list[Any]] = []
+    for call in calls:
+        if call["name"] in reads and out and out[-1][0]["name"] in reads:
+            out[-1].append(call)
+        else:
+            out.append([call])
+    return out
 
 
 def after_think(state: ClaimState) -> str:
