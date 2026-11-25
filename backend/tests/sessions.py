@@ -43,9 +43,9 @@ def install() -> None:
     with db.connect() as conn:
         users = conn.execute("SELECT user_id, tenant_id FROM users").fetchall()
         conn.executemany(
-            "INSERT OR IGNORE INTO sessions (token_hash, user_id, tenant_id, csrf_hash,"
+            "INSERT INTO sessions (token_hash, user_id, tenant_id, csrf_hash,"
             " created_at, last_seen, expires_at, revoked_at)"
-            " VALUES (?, ?, ?, '', ?, ?, ?, '')",
+            " VALUES (?, ?, ?, '', ?, ?, ?, '') ON CONFLICT DO NOTHING",
             [
                 (
                     auth.digest(token(u["user_id"])),

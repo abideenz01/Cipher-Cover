@@ -4,6 +4,7 @@ import type {
   DecisionKind,
   Failure,
   QueueRunStatus,
+  RunStatus,
   TodoStatus,
 } from "./api";
 
@@ -50,7 +51,16 @@ export const STOP_REASONS: Record<string, string> = {
   token_limit: "It spent its token budget.",
   stopped: "A handler stopped it.",
   provider_errors: "It paused after repeated errors from the model provider.",
+  restart: "The backend restarted; the next run finishes its claims.",
   error: "It failed.",
+};
+
+export const ATTEMPT_LABELS: Record<RunStatus, string> = {
+  running: "running",
+  succeeded: "succeeded",
+  failed: "failed",
+  paused: "waiting for sign-off",
+  interrupted: "stopped; carries on next run",
 };
 
 export const FAILURE_LABELS: Record<Failure, string> = {

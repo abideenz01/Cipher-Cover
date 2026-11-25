@@ -16,16 +16,20 @@ from backend import (
     runs,
     seed,
     signoff,
+    trace,
 )
 from backend.voice import routes as voice
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Seed an empty database on startup and free what a stopped backend left."""
+    """Seed an empty database on startup, deal with what a stopped backend left,
+    and ask the agent's service to carry on any claim that is due."""
     seed.seed()
     queue_runs.recover()
+    signoff.wake_agent()
     yield
+    trace.WRITER.flush()
 
 
 # The interactive docs and schema are served only with API_DOCS=1: they sit
@@ -35,7 +39,7 @@ DOCS = os.getenv("API_DOCS") == "1"
 app = FastAPI(
     title="UnderCover",
     lifespan=lifespan,
-    dependencies=[Depends(auth.guard)],
+    dependencies=[Depends(auth.guard), Depends(auth.scope)],
     openapi_url="/openapi.json" if DOCS else None,
 )
 app.include_router(auth.router)

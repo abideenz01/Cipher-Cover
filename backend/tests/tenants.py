@@ -6,6 +6,7 @@ with its own company settings (a $750.00 sign-off limit).
 
 ACME = "T-ACME"
 CLAIM = "CLM-5001"
+CLAIM_MEDICAL = "CLM-5004"
 POLICY = "POL-5001"
 CUSTOMER = "CUS-5001"
 HANDLER = "HND-A1"

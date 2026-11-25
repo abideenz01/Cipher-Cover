@@ -55,6 +55,7 @@ def test_only_health_login_and_public_config_are_open():
 def test_every_operation_has_someone_who_may_call_it():
     callers = set(permissions.PUBLIC) | permissions.CLAIM_AGENT
     callers |= permissions.QUEUE_AGENT | permissions.VOICE_AGENT
+    callers |= permissions.AGENT_SERVICE
     for allowed in permissions.ROLES.values():
         callers |= allowed
     operations = {o for o, _, _ in OPERATIONS}
@@ -218,8 +219,14 @@ def test_a_claim_agents_token_ends_with_its_run():
 
 def test_a_claim_agents_token_expires(monkeypatch):
     _, agent = claim_agent()
-    later = clock.now() + timedelta(seconds=200)
-    monkeypatch.setattr(clock, "now", lambda: later)
+    with db.connect() as conn:
+        limit = db.reference(conn, "company", sessions.TENANT)
+    # A claim token lasts the claim's time limit and a minute more.
+    start = clock.now()
+    lasts = limit["agent_run_timeout_seconds"] + 60
+    monkeypatch.setattr(clock, "now", lambda: start + timedelta(seconds=lasts - 5))
+    assert client.get("/api/claims/CLM-1001", headers=agent).status_code == 200
+    monkeypatch.setattr(clock, "now", lambda: start + timedelta(seconds=lasts + 5))
     assert client.get("/api/claims/CLM-1001", headers=agent).status_code == 401
 
 

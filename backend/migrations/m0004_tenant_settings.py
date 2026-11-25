@@ -6,7 +6,7 @@ login_failures records failed sign-ins, so the throttle is kept in the
 database rather than in one process's memory.
 """
 
-import sqlite3
+from backend import db
 
 VERSION = 4
 NAME = "tenant_settings"
@@ -21,8 +21,8 @@ CREATE INDEX login_failures_key ON login_failures (key, created_at);
 """
 
 
-def upgrade(conn: sqlite3.Connection) -> None:
+def upgrade(conn: db.Connection) -> None:
     """Create the tenant settings and sign-in failure tables."""
     for statement in SCHEMA.split(";"):
         if statement.strip():
-            conn.execute(statement)
+            conn.execute(db.ddl(statement, conn.dialect))

@@ -55,12 +55,15 @@ export interface Section {
   title: string;
 }
 
+export type RunStatus =
+  "running" | "succeeded" | "failed" | "paused" | "interrupted";
+
 export type Failure = "" | "provider" | "step_limit" | "time_limit" | "error";
 
 export interface Run {
   run_id: string;
   claim_id: string;
-  status: "running" | "succeeded" | "failed";
+  status: RunStatus;
   error: string;
   started_at: string;
   ended_at: string;
@@ -119,6 +122,21 @@ export interface Claim extends ClaimSummary {
   documents: ClaimDocument[];
   decisions: Decision[];
   runs: Run[];
+  signoffs: SignOff[];
+  payments: Payment[];
+}
+
+export interface SignOff {
+  amount: number;
+  signed_off_by: string;
+  signed_off_at: string;
+}
+
+export interface Payment {
+  amount: number;
+  paid_at: string;
+  signed_off_by: string;
+  signed_off_at: string;
 }
 
 export interface Policy {

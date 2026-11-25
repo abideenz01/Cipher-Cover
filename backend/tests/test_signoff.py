@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pytest
 
-from backend import clock, db
+from backend import clock, signoff
 from backend.tests import sessions
 from backend.tests.test_decisions import calculate, decide, pay
 
@@ -45,18 +45,50 @@ def test_people_who_cannot_sign_off(waiting, user_id):
 
 
 @pytest.mark.parametrize("user_id", ["USR-01", "USR-02", "USR-03"])
-def test_sign_off_pays(waiting, user_id):
-    assert sign_off(user_id).status_code == 200
+def test_sign_off_records_who_and_when_and_wakes_the_agent(
+    waiting, user_id, monkeypatch
+):
+    woken = []
+    monkeypatch.setattr(signoff, "wake_agent", lambda: woken.append(1))
+    response = sign_off(user_id)
+    handler = user_id.replace("USR", "HND")
+    assert response.status_code == 200
+    assert response.json()["signed_off_by"] == handler
+    assert woken == [1]
+    claim = client.get("/api/claims/CLM-1011").json()
+    assert claim["state"] == "in_progress"
+    assert claim["paid"] == 0
+    assert claim["signoffs"][0]["signed_off_at"] == response.json()["signed_off_at"]
+    assert client.get("/api/signoffs").json() == []
+
+    assert pay("CLM-1011", 1500.0).status_code == 200
     claim = client.get("/api/claims/CLM-1011").json()
     assert claim["state"] == "decided"
     assert claim["paid"] == 1500.0
-    assert client.get("/api/signoffs").json() == []
+    [payment] = claim["payments"]
+    assert payment["signed_off_by"] == handler
+    assert payment["signed_off_at"] == response.json()["signed_off_at"]
+
+
+def test_a_payout_over_the_limit_is_refused_without_a_sign_off(waiting):
     response = pay("CLM-1011", 1500.0)
     assert response.status_code == 409
-    assert response.json()["detail"] == "This claim is already paid."
-    with db.connect() as conn:
-        signed = conn.execute("SELECT handler_id FROM signoffs").fetchone()
-    assert signed["handler_id"] == user_id.replace("USR", "HND")
+    assert response.json()["detail"] == "Waiting for a handler's sign-off."
+    assert client.get("/api/claims/CLM-1011").json()["paid"] == 0
+
+
+def test_a_sign_off_stands_when_the_agent_cannot_be_reached(waiting, monkeypatch):
+    monkeypatch.setenv("AGENT_SERVICE_KEY", "a-key")
+    monkeypatch.setenv("UNDERCOVER_AGENT", "http://127.0.0.1:9")
+    signoff.knock("a-key")
+    assert sign_off("USR-01").status_code == 200
+    assert client.get("/api/claims/CLM-1011").json()["state"] == "in_progress"
+
+
+def test_without_a_key_the_agent_is_not_called(monkeypatch):
+    monkeypatch.delenv("AGENT_SERVICE_KEY", raising=False)
+    monkeypatch.setattr(signoff, "knock", lambda key: pytest.fail("called"))
+    signoff.wake_agent()
 
 
 def test_sign_off_needs_a_waiting_claim():

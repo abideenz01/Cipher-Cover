@@ -11,7 +11,8 @@ tenant's rows keep its own tenant_id.
 """
 
 import json
-import sqlite3
+
+from backend import db
 
 VERSION = 2
 NAME = "tenancy"
@@ -35,7 +36,7 @@ TABLES = (
 )
 
 
-def upgrade(conn: sqlite3.Connection) -> None:
+def upgrade(conn: db.Connection) -> None:
     """Add the tenants table, the first tenant and a tenant_id everywhere."""
     conn.execute(
         "CREATE TABLE tenants (tenant_id TEXT PRIMARY KEY, name TEXT NOT NULL,"

@@ -13,10 +13,8 @@ it acts for. Tokens are stored only as hashes.
 
 import hashlib
 import hmac
-import json
 import os
 import secrets
-import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Annotated, Any
@@ -32,6 +30,7 @@ SESSION_COOKIE = "cc_session"
 CSRF_COOKIE = "cc_csrf"
 CSRF_HEADER = "x-csrf-token"
 SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+SEEN_EVERY = timedelta(minutes=1)
 SCRYPT_N = 2**14
 SCRYPT_R = 8
 SCRYPT_P = 1
@@ -53,6 +52,10 @@ class Principal:
     roles: frozenset[str] = field(default_factory=frozenset)
     run_id: str = ""
     claim_id: str = ""
+    # A claim token's claim, read with the token, so each call checks its
+    # binding without another query. Empty if the claim is gone.
+    policy_id: str = ""
+    customer_id: str = ""
 
     @property
     def agent(self) -> bool:
@@ -66,6 +69,8 @@ class Principal:
             return self.user_id
         if self.kind == "voice":
             return f"voice:{self.user_id}"
+        if self.kind == "service":
+            return "agent-service"
         return f"{self.kind}:{self.run_id}"
 
 
@@ -117,13 +122,13 @@ def past(stamp: str) -> bool:
     return datetime.fromisoformat(stamp) <= clock.now()
 
 
-def roles_of(conn: sqlite3.Connection, user_id: str) -> frozenset[str]:
+def roles_of(conn: db.Connection, user_id: str) -> frozenset[str]:
     """Return a user's roles."""
     rows = conn.execute("SELECT role FROM user_roles WHERE user_id = ?", (user_id,))
     return frozenset(r["role"] for r in rows.fetchall())
 
 
-def person(conn: sqlite3.Connection, user: sqlite3.Row) -> Principal:
+def person(conn: db.Connection, user: db.Row) -> Principal:
     """Return the principal for a signed-in user."""
     roles = roles_of(conn, user["user_id"])
     return Principal(
@@ -137,14 +142,14 @@ def person(conn: sqlite3.Connection, user: sqlite3.Row) -> Principal:
     )
 
 
-def active_user(conn: sqlite3.Connection, user_id: str) -> sqlite3.Row | None:
+def active_user(conn: db.Connection, user_id: str) -> db.Row | None:
     """Return an active user's row, or None."""
     return conn.execute(
         "SELECT * FROM users WHERE user_id = ? AND status = 'active'", (user_id,)
     ).fetchone()
 
 
-def create_session(conn: sqlite3.Connection, user: sqlite3.Row) -> tuple[str, str]:
+def create_session(conn: db.Connection, user: db.Row) -> tuple[str, str]:
     """Start a session and return its token and CSRF token."""
     token = "cs_" + secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(24)
@@ -166,20 +171,30 @@ def create_session(conn: sqlite3.Connection, user: sqlite3.Row) -> tuple[str, st
 
 
 def session_principal(
-    conn: sqlite3.Connection, token: str, request: Request, cookie: bool
+    conn: db.Connection, token: str, request: Request, cookie: bool
 ) -> Principal | None:
-    """Return the principal for a live session, refreshing when it was seen."""
-    row = conn.execute(
-        "SELECT * FROM sessions WHERE token_hash = ? AND revoked_at = ''",
+    """Return the principal for a live session, refreshing when it was seen.
+
+    The session, its user and the user's roles come back in one query, one row
+    for each role, because against a remote database every round trip counts.
+    """
+    rows = conn.execute(
+        "SELECT s.token_hash, s.user_id, s.tenant_id, s.csrf_hash, s.last_seen,"
+        " s.expires_at, u.tenant_id AS user_tenant, u.handler_id, u.name, r.role"
+        " FROM sessions s JOIN users u ON u.user_id = s.user_id"
+        " AND u.status = 'active'"
+        " LEFT JOIN user_roles r ON r.user_id = u.user_id"
+        " WHERE s.token_hash = ? AND s.revoked_at = ''",
         (digest(token),),
-    ).fetchone()
-    if row is None or past(row["expires_at"]):
+    ).fetchall()
+    if not rows:
         return None
+    row = rows[0]
+    if past(row["expires_at"]) or row["user_tenant"] != row["tenant_id"]:
+        return None
+    seen = datetime.fromisoformat(row["last_seen"])
     idle = timedelta(minutes=setting("SESSION_IDLE_MINUTES", 30))
-    if datetime.fromisoformat(row["last_seen"]) + idle <= clock.now():
-        return None
-    user = active_user(conn, row["user_id"])
-    if user is None or user["tenant_id"] != row["tenant_id"]:
+    if seen + idle <= clock.now():
         return None
     if cookie and request.method not in SAFE_METHODS:
         sent = request.headers.get(CSRF_HEADER, "")
@@ -194,15 +209,27 @@ def session_principal(
                 ip(request),
             )
             raise HTTPException(403, "The request is missing its CSRF token.")
-    conn.execute(
-        "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
-        (clock.stamp(), row["token_hash"]),
+    # Refreshed at most once a minute: the idle limit is in minutes, and a
+    # write on every call would cost every call a round trip.
+    if seen + SEEN_EVERY <= clock.now():
+        conn.execute(
+            "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
+            (clock.stamp(), row["token_hash"]),
+        )
+    roles = frozenset(r["role"] for r in rows if r["role"])
+    return Principal(
+        kind="user",
+        tenant_id=row["tenant_id"],
+        operations=permissions.for_roles(roles),
+        user_id=row["user_id"],
+        handler_id=row["handler_id"],
+        name=row["name"],
+        roles=roles,
     )
-    return person(conn, user)
 
 
 def issue(  # noqa: PLR0913, PLR0917 - a token's binding, one argument each
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     tenant_id: str,
     kind: str,
     seconds: float,
@@ -239,7 +266,7 @@ def issue(  # noqa: PLR0913, PLR0917 - a token's binding, one argument each
     return token
 
 
-def revoke(conn: sqlite3.Connection, run_id: str) -> None:
+def revoke(conn: db.Connection, run_id: str) -> None:
     """Revoke every service token issued for a run."""
     conn.execute(
         "UPDATE service_tokens SET revoked_at = ? WHERE run_id = ? AND revoked_at = ''",
@@ -247,7 +274,7 @@ def revoke(conn: sqlite3.Connection, run_id: str) -> None:
     )
 
 
-def revoke_token(conn: sqlite3.Connection, token: str) -> None:
+def revoke_token(conn: db.Connection, token: str) -> None:
     """Revoke one service token."""
     conn.execute(
         "UPDATE service_tokens SET revoked_at = ? WHERE token_hash = ?",
@@ -255,10 +282,12 @@ def revoke_token(conn: sqlite3.Connection, token: str) -> None:
     )
 
 
-def service_principal(conn: sqlite3.Connection, token: str) -> Principal | None:
+def service_principal(conn: db.Connection, token: str) -> Principal | None:
     """Return the principal for a live service token."""
     row = conn.execute(
-        "SELECT * FROM service_tokens WHERE token_hash = ? AND revoked_at = ''",
+        "SELECT t.*, c.policy_id, c.customer_id FROM service_tokens t"
+        " LEFT JOIN claims c ON c.claim_id = t.claim_id AND c.tenant_id = t.tenant_id"
+        " WHERE t.token_hash = ? AND t.revoked_at = ''",
         (digest(token),),
     ).fetchone()
     if row is None or past(row["expires_at"]):
@@ -283,6 +312,8 @@ def service_principal(conn: sqlite3.Connection, token: str) -> Principal | None:
         operations=permissions.AGENTS[row["kind"]],
         run_id=row["run_id"],
         claim_id=row["claim_id"],
+        policy_id=row["policy_id"] or "",
+        customer_id=row["customer_id"] or "",
     )
 
 
@@ -291,11 +322,21 @@ def ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
-def authenticate(conn: sqlite3.Connection, request: Request) -> Principal | None:
+def agent_service(token: str) -> bool:
+    """Say whether a bearer token is the agent's service key."""
+    key = os.getenv("AGENT_SERVICE_KEY") or ""
+    return bool(key) and hmac.compare_digest(token, key)
+
+
+def authenticate(conn: db.Connection, request: Request) -> Principal | None:
     """Return the caller, from a bearer token or the session cookie, or None."""
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):
         token = header[7:].strip()
+        if agent_service(token):
+            return Principal(
+                kind="service", tenant_id="", operations=permissions.AGENT_SERVICE
+            )
         if token.startswith("ct_"):
             return service_principal(conn, token)
         return session_principal(conn, token, request, cookie=False)
@@ -303,23 +344,18 @@ def authenticate(conn: sqlite3.Connection, request: Request) -> Principal | None
     return session_principal(conn, cookie, request, cookie=True) if cookie else None
 
 
-def bound(conn: sqlite3.Connection, who: Principal, request: Request) -> str:
+def bound(conn: db.Connection, who: Principal, request: Request) -> str:
     """Return why an agent's token does not reach this request, or '' if it does."""
     params = dict(request.path_params)
     if "run_id" in request.query_params:
         params.setdefault("run_id", request.query_params["run_id"])
     if who.kind == "claim":
-        claim = conn.execute(
-            "SELECT policy_id, customer_id FROM claims"
-            " WHERE claim_id = ? AND tenant_id = ?",
-            (who.claim_id, who.tenant_id),
-        ).fetchone()
-        if claim is None:
+        if not who.policy_id:
             return "This run's claim is gone."
         allowed = {
             "claim_id": who.claim_id,
-            "policy_id": claim["policy_id"],
-            "customer_id": claim["customer_id"],
+            "policy_id": who.policy_id,
+            "customer_id": who.customer_id,
             "run_id": who.run_id,
         }
         for key, value in params.items():
@@ -377,6 +413,15 @@ def guard(request: Request) -> Principal | None:
     return who
 
 
+async def scope(found: Annotated[Principal | None, Depends(guard)]) -> None:
+    """Hold the caller's tenant for the request, so its queries run under RLS.
+
+    It is async so the value is set in the request's own context, which the
+    route's thread then inherits.
+    """
+    db.TENANT.set(found.tenant_id if found else "")
+
+
 def current(found: Annotated[Principal | None, Depends(guard)]) -> Principal:
     """Return the caller of a route that is not public."""
     if found is None:
@@ -387,14 +432,6 @@ def current(found: Annotated[Principal | None, Depends(guard)]) -> Principal:
 Who = Annotated[Principal, Depends(current)]
 
 
-def tenant_config(conn: sqlite3.Connection, tenant_id: str) -> dict[str, Any]:
-    """Return a tenant's settings."""
-    row = conn.execute(
-        "SELECT config FROM tenants WHERE tenant_id = ?", (tenant_id,)
-    ).fetchone()
-    return json.loads(row["config"]) if row else {}
-
-
 class Login(BaseModel):
     """An email and password."""
 
@@ -402,7 +439,7 @@ class Login(BaseModel):
     password: str
 
 
-def throttled(conn: sqlite3.Connection, *keys: str) -> bool:
+def throttled(conn: db.Connection, *keys: str) -> bool:
     """Return whether any key has failed too often lately.
 
     Failures are kept in the database, so a restart or a second backend
@@ -419,7 +456,7 @@ def throttled(conn: sqlite3.Connection, *keys: str) -> bool:
     return False
 
 
-def failed(conn: sqlite3.Connection, *keys: str) -> None:
+def failed(conn: db.Connection, *keys: str) -> None:
     """Count a failed sign-in against each key, and forget old failures."""
     conn.execute(
         "DELETE FROM login_failures WHERE created_at <= ?",
@@ -431,7 +468,7 @@ def failed(conn: sqlite3.Connection, *keys: str) -> None:
     )
 
 
-def me(conn: sqlite3.Connection, who: Principal) -> dict[str, Any]:
+def me(conn: db.Connection, who: Principal) -> dict[str, Any]:
     """Describe the signed-in person to the dashboard."""
     tenant = conn.execute(
         "SELECT name FROM tenants WHERE tenant_id = ?", (who.tenant_id,)

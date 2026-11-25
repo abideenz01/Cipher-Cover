@@ -22,7 +22,20 @@ export default defineConfig({
         VOICE_PROVIDER: "stub",
         DEMO_PASSWORD: "e2e-demo-password",
         COOKIE_SECURE: "0",
+        // Empty, so a developer's .env can't move e2e runs to Supabase or Langfuse.
+        DATABASE_URL: "",
+        LANGFUSE_PUBLIC_KEY: "",
+        LANGFUSE_SECRET_KEY: "",
+        LANGFUSE_BASE_URL: "",
+        // A stand-in for the agent's service, never the one npm run dev starts.
+        UNDERCOVER_AGENT: "http://127.0.0.1:8003",
+        AGENT_SERVICE_KEY: "e2e-agent-service-key",
       },
+    },
+    {
+      command: "node scripts/agent-stand-in.mjs",
+      url: "http://127.0.0.1:8003/health",
+      reuseExistingServer: false,
     },
     {
       command: "npx vite dashboard --port 5173 --strictPort",

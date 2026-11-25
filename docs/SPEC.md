@@ -21,7 +21,7 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 
 One run works the whole queue. The agent plans the run as a to-do list, works each waiting claim with a fresh helper for that claim, and ends with a short summary for the handlers. A run can be capped at a number of claims, with the rest left waiting, and the agent can still be run on one named claim.
 
-A claim that fails before it is decided goes back in the queue to be tried again. A claim that fails twice is left for a handler: it stays waiting, runs of the queue skip it, and a handler can still run the agent on it. No claim is ever decided or paid twice. A run has limits on the steps and the time for each claim and on the tokens for the whole run, pauses itself after repeated errors from the model provider, and can be stopped from the dashboard.
+The claim agent saves its progress after every step. A claim stopped partway, by a restart or a stopped run, carries on from its last step with no attempt counted. A claim over the sign-off limit waits; once a senior handler signs off, the agent picks it back up and pays it, recording who signed off and when. A claim that fails with an error goes back in the queue to be tried again from the start. A claim that fails twice is left for a handler: it stays waiting, runs of the queue skip it, and a handler can still run the agent on it. No claim is ever decided or paid twice. A run has limits on the steps and the time for each claim and on the tokens for the whole run, pauses itself after repeated errors from the model provider, and can be stopped from the dashboard.
 
 ## What the team needs to see
 
@@ -49,7 +49,7 @@ Everything is in `data/`, described in `data/README.md`: the claims queue, the p
 - Each person belongs to one tenant (an insurer) and sees only that tenant's claims, policies, customers, runs and voice sessions. A record in another tenant is answered as not found.
 - Roles decide what a person may do. A claims handler reads the queue, runs the agent, sends claims back and uses voice. A senior handler can also sign off payouts over $1,000.00. An SIU investigator, an auditor and a tenant admin can read; the auditor and the admin can also read the security log. Nobody but the agent records a decision or pays, and the agent only through its own run.
 - Medical records and medical bills never go to the model unless the tenant has said they may. Agents see a customer's first name and last initial only.
-- Isolation between tenants is enforced by the application on SQLite. Production with more than one tenant's data needs PostgreSQL with row-level security first (`docs/ADR_POSTGRES.md`).
+- Isolation between tenants is enforced by the application, and on PostgreSQL (Supabase) by row-level security as well (`docs/ADR_POSTGRES.md`). SQLite is for tests and local work only.
 
 ## Not for now
 

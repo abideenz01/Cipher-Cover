@@ -1,7 +1,8 @@
 from typing import Any
 
+from agent import stub
 from backend import db, runs
-from backend.tests import sessions
+from backend.tests import sessions, tenants
 
 client = sessions.client()
 
@@ -33,15 +34,8 @@ def read(claim_id: str, source: str = "wording", number: int = 5) -> None:
 
 def lines(claim_id: str) -> list[dict[str, Any]]:
     """Return every item on a claim as a line to pay."""
-    items = client.get(f"/api/claims/{claim_id}").json()["items"]
-    return [
-        {
-            "description": i["description"],
-            "amount": i["amount"],
-            "electronic": i["category"] == "electronics",
-        }
-        for i in items
-    ]
+    claim = client.get(f"/api/claims/{claim_id}").json()
+    return [stub.line(claim["claim_type"], i) for i in claim["items"]]
 
 
 def calculate(claim_id: str) -> Any:
@@ -116,9 +110,31 @@ def test_under_the_limit_is_paid_once():
     calculate("CLM-1001")
     assert decide("CLM-1001", "approve", 420.0).json()["state"] == "decided"
     assert pay("CLM-1001", 420.0).status_code == 200
-    assert pay("CLM-1001", 420.0).status_code == 409
+    assert pay("CLM-1001", 420.0).json() == {"claim_id": "CLM-1001", "paid": 420.0}
+    assert pay("CLM-1001", 400.0).status_code == 409
     assert client.get("/api/claims/CLM-1001").json()["paid"] == 420.0
     assert decide("CLM-1001", "refer", 0).status_code == 409
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 1
+
+
+def test_a_repeated_decision_counts_as_done():
+    calculate("CLM-1001")
+    first = decide("CLM-1001", "approve", 420.0).json()
+    again = decide("CLM-1001", "approve", 420.0)
+    assert again.status_code == 200
+    assert again.json() == first
+    assert decide("CLM-1001", "decline", 0).status_code == 409
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] == 1
+
+
+def test_a_repeat_from_another_run_is_refused():
+    calculate("CLM-1001")
+    decide("CLM-1001", "approve", 420.0)
+    with db.connect() as conn:
+        conn.execute("UPDATE decisions SET run_id = 'another-run'")
+    assert decide("CLM-1001", "approve", 420.0).status_code == 409
 
 
 def test_pay_only_the_approved_amount():
@@ -202,3 +218,74 @@ def test_a_decision_needs_a_reason():
         "/api/claims/CLM-1002/decision", json=body, headers=agent("CLM-1002")
     )
     assert response.json()["detail"] == "The reason is missing."
+
+
+def expense(amount: float) -> dict[str, Any]:
+    return {
+        "description": "Hospital bill",
+        "amount": amount,
+        "kind": "expense",
+        "quantity": 1,
+        "nights": 0,
+        "hours": 0,
+    }
+
+
+def test_calculation_says_when_the_payout_needs_sign_off():
+    assert calculate("CLM-1001").json()["needs_sign_off"] is False
+    assert calculate("CLM-1011").json()["needs_sign_off"] is True
+
+
+def test_acme_payout_over_its_own_750_limit_needs_sign_off():
+    run_id = runs.begin(tenants.CLAIM_MEDICAL, tenants.ACME)
+    body = {"run_id": run_id, "lines": [expense(900)], "paid_by_others": 0}
+    result = client.post(
+        f"/api/claims/{tenants.CLAIM_MEDICAL}/calculate",
+        json=body,
+        headers=sessions.claim_agent(run_id),
+    ).json()
+    assert 750 < result["payout"] < 1000
+    assert result["needs_sign_off"] is True
+
+
+def test_the_queue_shows_each_claim_as_its_own_page_does():
+    calculate("CLM-1001")
+    decide("CLM-1001", "approve", 420.0)
+    pay("CLM-1001", 420.0)
+    decide("CLM-1002", "refer", 0)
+    queue = client.get("/api/claims").json()
+    for listed in queue:
+        claim = client.get(f"/api/claims/{listed['claim_id']}").json()
+        assert listed == {k: claim[k] for k in listed}
+    shown = {c["claim_id"]: c for c in queue}
+    assert (shown["CLM-1001"]["paid"], shown["CLM-1001"]["decision"]) == (
+        420.0,
+        "approve",
+    )
+    assert (shown["CLM-1002"]["paid"], shown["CLM-1002"]["decision"]) == (0.0, "refer")
+
+
+def test_a_claims_page_shows_each_runs_sections_in_few_queries(monkeypatch):
+    read("CLM-1001", "wording", 5)
+    read("CLM-1001", "manual", 9)
+    read("CLM-1001", "wording", 5)
+    first = lease("CLM-1001")
+    with db.connect() as conn:
+        conn.execute("UPDATE runs SET status = 'failed' WHERE run_id = ?", (first,))
+        conn.execute("UPDATE claims SET state = 'waiting' WHERE claim_id = 'CLM-1001'")
+    read("CLM-1001", "wording", 10)
+    counted = []
+    real = db.Connection.execute
+
+    def counting(self, sql, *args):
+        counted.append(sql)
+        return real(self, sql, *args)
+
+    monkeypatch.setattr(db.Connection, "execute", counting)
+    claim = client.get("/api/claims/CLM-1001").json()
+    shown = {r["run_id"]: [s["id"] for s in r["sections_read"]] for r in claim["runs"]}
+    assert shown[first] == ["wording-5", "manual-9"]
+    assert [ids for run, ids in shown.items() if run != first] == [["wording-10"]]
+    # The sign-in check, then the claim and its customer and settings,
+    # decisions, runs, sendbacks, sign-offs, payments and sections.
+    assert len(counted) <= 8

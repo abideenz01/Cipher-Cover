@@ -6,8 +6,6 @@ harness made and only then records itself as applied. Anything missing,
 extra or different is refused, never accepted silently.
 """
 
-import sqlite3
-
 from backend import db
 from backend.migrations.schema import SchemaMismatch, differences, expected, tables
 
@@ -15,14 +13,16 @@ VERSION = 1
 NAME = "baseline"
 
 
-def upgrade(conn: sqlite3.Connection) -> None:
+def upgrade(conn: db.Connection) -> None:
     """Create the harness schema, or adopt an existing one that matches it."""
     actual = tables(conn)
     if not actual:
         for statement in db.SCHEMA.split(";"):
             if statement.strip():
-                conn.execute(statement)
+                conn.execute(db.ddl(statement, conn.dialect))
         return
+    if conn.dialect == "postgresql":
+        raise SchemaMismatch([f"tables {', '.join(actual)} exist with no migrations"])
     problems = differences(actual, expected(db.SCHEMA))
     if problems:
         raise SchemaMismatch(problems)

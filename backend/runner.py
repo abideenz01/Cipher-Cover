@@ -24,6 +24,24 @@ def execute(
         main.run(claim_id, run_id, llm, on_step, seconds)
 
 
+def resume(
+    claim_id: str,
+    run_id: str,
+    signoff: dict[str, Any] | None,
+    on_step: Callable[[dict[str, Any]], None],
+    token: str,
+) -> None:
+    """Carry a run on, on its own thread, with the scripted model if AGENT_STUB=1."""
+    llm = ScriptedModel() if os.getenv("AGENT_STUB") == "1" else None
+    with db.connect() as conn:
+        tenant_id = conn.execute(
+            "SELECT tenant_id FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()["tenant_id"]
+        seconds = db.reference(conn, "company", tenant_id)["agent_run_timeout_seconds"]
+    with main.acting(token):
+        main.resume(claim_id, run_id, signoff, llm, on_step, seconds)
+
+
 def execute_queue(
     run_id: str, on_step: Callable[[str, dict[str, Any]], None], token: str
 ) -> None:

@@ -1,7 +1,6 @@
 """Short, spoken facts about claims. No story, document text or personal data."""
 
 import json
-import sqlite3
 from typing import Any
 
 from backend import db, store
@@ -96,9 +95,7 @@ def speak_claim_id(claim_id: str) -> str:
     return "claim " + " ".join(DIGITS[int(d)] for d in claim_id if d.isdigit())
 
 
-def claim_brief(
-    conn: sqlite3.Connection, claim_id: str, tenant_id: str
-) -> dict[str, Any]:
+def claim_brief(conn: db.Connection, claim_id: str, tenant_id: str) -> dict[str, Any]:
     """Return the facts of one of the tenant's claims."""
     row = store.claim_row(conn, claim_id, tenant_id)
     data = json.loads(row["data"])
@@ -125,7 +122,7 @@ def claim_brief(
 
 
 def decision_brief(
-    conn: sqlite3.Connection, claim_id: str, tenant_id: str
+    conn: db.Connection, claim_id: str, tenant_id: str
 ) -> dict[str, Any]:
     """Return a claim's latest decision."""
     row = store.claim_row(conn, claim_id, tenant_id)
@@ -160,7 +157,7 @@ def decision_brief(
 
 
 def run_status_brief(
-    conn: sqlite3.Connection, claim_id: str, tenant_id: str
+    conn: db.Connection, claim_id: str, tenant_id: str
 ) -> dict[str, Any]:
     """Return the outcome of a claim's latest run."""
     row = store.claim_row(conn, claim_id, tenant_id)
@@ -187,7 +184,7 @@ def run_status_brief(
     }
 
 
-def analytics_brief(conn: sqlite3.Connection, tenant_id: str) -> dict[str, Any]:
+def analytics_brief(conn: db.Connection, tenant_id: str) -> dict[str, Any]:
     """Return the number of the tenant's claims in each state and the total paid."""
     counts = dict.fromkeys(STATES, 0)
     for row in conn.execute(

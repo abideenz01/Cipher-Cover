@@ -2,6 +2,8 @@
 
 import sqlite3
 
+from backend import db
+
 Columns = dict[str, tuple[str, int, str | None, int]]
 
 # Tables the runner or SQLite itself owns, left out of every comparison.
@@ -20,8 +22,19 @@ class SchemaMismatch(Exception):
         self.problems = problems
 
 
-def tables(conn: sqlite3.Connection) -> dict[str, Columns]:
-    """Return each table's columns as name -> (type, not null, default, pk)."""
+def tables(conn: "db.Connection | sqlite3.Connection") -> dict[str, Columns]:
+    """Return each table's columns as name -> (type, not null, default, pk).
+
+    On PostgreSQL only the names matter: a schema there is always built by the
+    migrations, so any table found without them is refused.
+    """
+    if getattr(conn, "dialect", "sqlite") == "postgresql":
+        rows = conn.execute(
+            "SELECT table_name FROM information_schema.tables"
+            " WHERE table_schema = current_schema() AND table_name <> ?",
+            OWN_TABLES,
+        ).fetchall()
+        return {r[0]: {} for r in rows}
     names = [
         r[0]
         for r in conn.execute(

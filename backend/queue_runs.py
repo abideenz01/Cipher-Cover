@@ -7,7 +7,6 @@ provider errors and the check for missed claims.
 
 import json
 import os
-import sqlite3
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -15,8 +14,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from agent import main
-from backend import auth, claims, clock, db, runner, runs, store
+from agent import checkpoints, main
+from backend import auth, claims, clock, db, runner, runs, store, trace
 
 router = APIRouter(prefix="/api")
 LIVE = ("running", "stopping", "paused")
@@ -65,7 +64,7 @@ class Summary(BaseModel):
     summary: str
 
 
-def limits(conn: sqlite3.Connection, tenant_id: str) -> dict[str, int]:
+def limits(conn: db.Connection, tenant_id: str) -> dict[str, int]:
     """Return the limits for a new run, from the environment and company settings."""
     company = db.reference(conn, "company", tenant_id)
     return {
@@ -76,7 +75,7 @@ def limits(conn: sqlite3.Connection, tenant_id: str) -> dict[str, int]:
     }
 
 
-def queue_row(conn: sqlite3.Connection, run_id: str, tenant_id: str) -> sqlite3.Row:
+def queue_row(conn: db.Connection, run_id: str, tenant_id: str) -> db.Row:
     """Return one of the tenant's queue runs, or raise 404."""
     row = conn.execute(
         "SELECT * FROM queue_runs WHERE run_id = ? AND tenant_id = ?",
@@ -87,7 +86,7 @@ def queue_row(conn: sqlite3.Connection, run_id: str, tenant_id: str) -> sqlite3.
     return row
 
 
-def tokens(conn: sqlite3.Connection, row: sqlite3.Row) -> int:
+def tokens(conn: db.Connection, row: db.Row) -> int:
     """Return the tokens a queue run has used, its own and its claim runs'."""
     claims_used = conn.execute(
         "SELECT COALESCE(SUM(tokens), 0) FROM runs WHERE queue_run_id = ?",
@@ -96,16 +95,16 @@ def tokens(conn: sqlite3.Connection, row: sqlite3.Row) -> int:
     return row["tokens"] + claims_used
 
 
-def taken(conn: sqlite3.Connection, run_id: str) -> list[str]:
+def taken(conn: db.Connection, run_id: str) -> list[str]:
     """Return the distinct claims a queue run has taken, in order."""
     rows = conn.execute(
-        "SELECT claim_id FROM runs WHERE queue_run_id = ? ORDER BY started_at, rowid",
+        "SELECT claim_id FROM runs WHERE queue_run_id = ? ORDER BY started_at, seq",
         (run_id,),
     ).fetchall()
     return list(dict.fromkeys(r["claim_id"] for r in rows))
 
 
-def eligible(conn: sqlite3.Connection, tenant_id: str) -> list[str]:
+def eligible(conn: db.Connection, tenant_id: str) -> list[str]:
     """Return the tenant's waiting claims a queue run may take, in id order."""
     rows = conn.execute(
         "SELECT claim_id FROM claims WHERE state = 'waiting' AND failed_attempts < ?"
@@ -115,25 +114,25 @@ def eligible(conn: sqlite3.Connection, tenant_id: str) -> list[str]:
     return [r["claim_id"] for r in rows]
 
 
-def budget_spent(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
+def budget_spent(conn: db.Connection, row: db.Row) -> bool:
     """Return whether the run has used its token budget."""
     return tokens(conn, row) >= json.loads(row["limits"])["token_limit"]
 
 
-def missed(conn: sqlite3.Connection, row: sqlite3.Row) -> list[str]:
+def missed(conn: db.Connection, row: db.Row) -> list[str]:
     """Return the waiting claims still within the cap that the run has not decided."""
     worked = taken(conn, row["run_id"])
     room = row["cap"] == 0 or len(worked) < row["cap"]
     return [c for c in eligible(conn, row["tenant_id"]) if room or c in worked]
 
 
-def view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+def view(conn: db.Connection, row: db.Row) -> dict[str, Any]:
     """Return a queue run for the API."""
     ended = row["ended_at"] or clock.stamp()
     seconds = datetime.fromisoformat(ended) - datetime.fromisoformat(row["started_at"])
     attempts = conn.execute(
         "SELECT run_id, claim_id, attempt, status, failure, tokens FROM runs"
-        " WHERE queue_run_id = ? ORDER BY started_at, rowid",
+        " WHERE queue_run_id = ? ORDER BY started_at, seq",
         (row["run_id"],),
     ).fetchall()
     return dict(row) | {
@@ -147,7 +146,7 @@ def view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def finished_todos(row: sqlite3.Row) -> str:
+def finished_todos(row: db.Row) -> str:
     """Return the to-do list with every unfinished item marked not started."""
     todos = json.loads(row["todos"])
     for todo in todos:
@@ -156,9 +155,7 @@ def finished_todos(row: sqlite3.Row) -> str:
     return json.dumps(todos)
 
 
-def end(
-    conn: sqlite3.Connection, row: sqlite3.Row, status: str, reason: str, error: str
-) -> None:
+def end(conn: db.Connection, row: db.Row, status: str, reason: str, error: str) -> None:
     """End a queue run."""
     conn.execute(
         "UPDATE queue_runs SET status = ?, stop_reason = ?, error = ?, todos = ?,"
@@ -203,6 +200,8 @@ def work(run_id: str) -> None:
         tenant_id = runs.tenant_of(conn, run_id)
         token = auth.issue(conn, tenant_id, "queue", QUEUE_TOKEN_SECONDS, run_id=run_id)
     try:
+        # Finish what a stopped run left, on its own threads, before planning.
+        runs.carry_on(tenant_id)
         runner.execute_queue(run_id, runs.record, token)
     except Exception as error:  # noqa: BLE001 - a failed run must free its claims
         close(run_id, main.describe(error), main.failure(error))
@@ -211,28 +210,55 @@ def work(run_id: str) -> None:
 
 
 def recover() -> None:
-    """On startup, free what a stopped backend left: no run can still be live."""
+    """On startup, deal with what a stopped backend left: no run can still be live.
+
+    When the claim agent's progress is durable (PostgreSQL), a claim run that
+    was working is interrupted: it keeps its claim and its attempt, and the next
+    queue run, or the agent's service, carries it on from its last step. A
+    stopped queue run ends, and the next one finishes its claims. Without
+    durable progress, claims go back to waiting with a failed attempt.
+    """
     message = "The backend restarted."
     with db.connect() as conn:
-        conn.execute(
-            "UPDATE claims SET state = 'waiting', state_since = ?,"
-            " failed_attempts = failed_attempts + 1 WHERE state = 'in_progress'",
-            (clock.stamp(),),
-        )
-        conn.execute(
-            "UPDATE runs SET status = 'failed', failure = 'error', error = ?,"
-            " ended_at = ? WHERE status = 'running'",
-            (message, clock.stamp()),
-        )
-        for row in conn.execute(
-            "SELECT * FROM queue_runs WHERE status IN ('running', 'stopping', 'paused')"
-        ).fetchall():
-            end(conn, row, "failed", "error", message)
+        if checkpoints.durable():
+            interrupt(conn)
+        else:
+            free(conn, message)
         conn.execute(
             "UPDATE service_tokens SET revoked_at = ? WHERE revoked_at = ''"
             " AND kind IN ('claim', 'queue')",
             (clock.stamp(),),
         )
+
+
+def interrupt(conn: db.Connection) -> None:
+    """Keep each working claim run's place, and end the live queue runs."""
+    conn.execute(
+        "UPDATE runs SET status = 'interrupted', ended_at = ? WHERE status = 'running'",
+        (clock.stamp(),),
+    )
+    for row in conn.execute(
+        "SELECT * FROM queue_runs WHERE status IN ('running', 'stopping', 'paused')"
+    ).fetchall():
+        end(conn, row, "stopped", "restart", "")
+
+
+def free(conn: db.Connection, message: str) -> None:
+    """Return working claims to waiting with a failed attempt, and fail the runs."""
+    conn.execute(
+        "UPDATE claims SET state = 'waiting', state_since = ?,"
+        " failed_attempts = failed_attempts + 1 WHERE state = 'in_progress'",
+        (clock.stamp(),),
+    )
+    conn.execute(
+        "UPDATE runs SET status = 'failed', failure = 'error', error = ?,"
+        " ended_at = ? WHERE status = 'running'",
+        (message, clock.stamp()),
+    )
+    for row in conn.execute(
+        "SELECT * FROM queue_runs WHERE status IN ('running', 'stopping', 'paused')"
+    ).fetchall():
+        end(conn, row, "failed", "error", message)
 
 
 def model() -> tuple[str, str]:
@@ -259,8 +285,9 @@ def start_queue_run(body: QueueRunStart, who: auth.Who) -> dict[str, Any]:
             "INSERT INTO queue_runs (run_id, status, cap, limits, model,"
             " reasoning_effort, fingerprint, todos, summary, stop_reason, error,"
             " tokens, model_calls, provider_failures, started_at, ended_at,"
-            " tenant_id) VALUES"
-            " (?, 'running', ?, ?, ?, ?, ?, '[]', '', '', '', 0, 0, 0, ?, '', ?)",
+            " tenant_id, seq) VALUES"
+            " (?, 'running', ?, ?, ?, ?, ?, '[]', '', '', '', 0, 0, 0, ?, '', ?,"
+            " (SELECT COALESCE(MAX(seq), 0) + 1 FROM queue_runs))",
             (
                 run_id,
                 body.cap,
@@ -283,7 +310,7 @@ def list_queue_runs(who: auth.Who) -> list[dict[str, Any]]:
     with db.connect() as conn:
         rows = conn.execute(
             "SELECT * FROM queue_runs WHERE tenant_id = ?"
-            " ORDER BY started_at DESC, rowid DESC LIMIT ?",
+            " ORDER BY started_at DESC, seq DESC LIMIT ?",
             (who.tenant_id, HISTORY),
         ).fetchall()
         return [view(conn, r) for r in rows]
@@ -324,7 +351,7 @@ NOT_RUNNING = {
 }
 
 
-def refusal(conn: sqlite3.Connection, row: sqlite3.Row, claim_id: str) -> str:
+def refusal(conn: db.Connection, row: db.Row, claim_id: str) -> str:
     """Return why the run may not take this claim, or '' if it may."""
     if row["status"] != "running":
         return NOT_RUNNING.get(row["status"], "The run has finished.")
@@ -344,6 +371,7 @@ def refusal(conn: sqlite3.Connection, row: sqlite3.Row, claim_id: str) -> str:
 @router.post("/queue-runs/{run_id}/attempts", operation_id="begin_attempt")
 def begin_attempt(run_id: str, body: Attempt, who: auth.Who) -> dict[str, Any]:
     """Lease a claim for a new claim run, with the token to work it, or refuse."""
+    trace.WRITER.flush()  # the token budget counts every model call saved so far
     with db.connect() as conn:
         reason = refusal(conn, queue_row(conn, run_id, who.tenant_id), body.claim_id)
         if reason:
@@ -358,7 +386,7 @@ def begin_attempt(run_id: str, body: Attempt, who: auth.Who) -> dict[str, Any]:
         ) | {"token": token}
 
 
-def outcome(conn: sqlite3.Connection, claim_run: sqlite3.Row) -> str:
+def outcome(conn: db.Connection, claim_run: db.Row) -> str:
     """Describe in one line how a claim run ended."""
     claim_id = claim_run["claim_id"]
     claim = store.claim_row(conn, claim_id, claim_run["tenant_id"])
@@ -393,7 +421,8 @@ def finish_attempt(run_id: str, body: AttemptEnd, who: auth.Who) -> dict[str, An
         pause = failures >= json.loads(row["limits"])["provider_failures_to_pause"]
         conn.execute(
             "UPDATE queue_runs SET provider_failures = ?,"
-            " status = CASE WHEN ? AND status = 'running' THEN 'paused' ELSE status END"
+            " status = CASE WHEN ? = 1 AND status = 'running' THEN 'paused'"
+            " ELSE status END"
             " WHERE run_id = ?",
             (failures, pause, row["run_id"]),
         )
@@ -406,6 +435,7 @@ def finish_attempt(run_id: str, body: AttemptEnd, who: auth.Who) -> dict[str, An
 @router.post("/queue-runs/{run_id}/finish", operation_id="finish_queue_run")
 def finish_queue_run(run_id: str, body: Summary, who: auth.Who) -> dict[str, Any]:
     """Record the summary, or refuse while waiting claims within the cap remain."""
+    trace.WRITER.flush()
     with db.connect() as conn:
         row = queue_row(conn, run_id, who.tenant_id)
         if row["status"] not in LIVE:

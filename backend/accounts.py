@@ -6,7 +6,6 @@ sign off or pay by managing users.
 """
 
 import json
-import sqlite3
 import uuid
 from typing import Any
 
@@ -51,7 +50,7 @@ def checked_roles(roles: list[str]) -> list[str]:
     return sorted(set(roles))
 
 
-def user_row(conn: sqlite3.Connection, user_id: str, tenant_id: str) -> sqlite3.Row:
+def user_row(conn: db.Connection, user_id: str, tenant_id: str) -> db.Row:
     """Return one of the tenant's users, or raise 404."""
     row = conn.execute(
         "SELECT * FROM users WHERE user_id = ? AND tenant_id = ?", (user_id, tenant_id)
@@ -61,7 +60,7 @@ def user_row(conn: sqlite3.Connection, user_id: str, tenant_id: str) -> sqlite3.
     return row
 
 
-def user_view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+def user_view(conn: db.Connection, row: db.Row) -> dict[str, Any]:
     """Return a user for the API, without the password hash."""
     return {
         "user_id": row["user_id"],
@@ -74,7 +73,7 @@ def user_view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
 
 
 def logged(
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     who: auth.Principal,
     kind: str,
     target: str,
@@ -183,7 +182,7 @@ def enable_user(user_id: str, who: auth.Who, request: Request) -> dict[str, Any]
     return set_status(user_id, "active", who, request)
 
 
-def settings_view(conn: sqlite3.Connection, tenant_id: str) -> dict[str, Any]:
+def settings_view(conn: db.Connection, tenant_id: str) -> dict[str, Any]:
     """Return a tenant's name, time zone and settings."""
     row = conn.execute(
         "SELECT * FROM tenants WHERE tenant_id = ?", (tenant_id,)

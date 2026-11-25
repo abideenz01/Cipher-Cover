@@ -13,10 +13,11 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel
 
-from agent import main
+from agent import main, tracing
 from agent.main import Step, call
 
 OnStep = Callable[[str, Step], None]
+START = {"messages": [{"role": "user", "content": "Work the queue."}]}
 
 
 class Todo(BaseModel):
@@ -131,9 +132,12 @@ def work_queue(
         system_prompt=call("GET", "/api/instructions")["queue"],
         middleware=middleware,
     )
-    config = {"configurable": {"thread_id": run_id, "model": main.label(llm)}}
+    config = {
+        "configurable": {"thread_id": run_id, "model": main.label(llm)},
+        **tracing.config(f"queue:{run_id}", "queue run"),
+    }
     reply = ""
-    for message in main.stream(agent, "Work the queue.", config, float("inf")):
+    for message in main.stream(agent, START, config, float("inf")):
         main.report(llm, message, lambda step: record(run_id, step))
         reply = message.text
     return reply

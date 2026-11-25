@@ -66,7 +66,14 @@ test("a payout over $1,000.00 waits for a handler who may sign off", async ({
   await row.getByRole("button", { name: "Sign off" }).click();
   await expect(row).toBeHidden();
   await page.getByRole("link", { name: "Queue" }).click();
-  await expect(card(column(page, "Decided"), "CLM-1011")).toBeVisible();
+  // The claim agent pays it; until then it shows as in progress.
+  await expect(card(column(page, "In progress"), "CLM-1011")).toBeVisible();
+  const calls = (await (
+    await page.request.get("http://127.0.0.1:8003/calls")
+  ).json()) as { authorization: string }[];
+  expect(calls).toContainEqual({
+    authorization: "Bearer e2e-agent-service-key",
+  });
 });
 
 test("send back returns a claim to Waiting", async ({ page }) => {

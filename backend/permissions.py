@@ -79,8 +79,14 @@ CLAIM_AGENT = frozenset(
         "calculate_payout",
         "record_decision",
         "pay_claim",
+        "record_run_step",
+        "end_claim_run",
     }
 )
+
+# The agent's service, signed in with AGENT_SERVICE_KEY, only takes the runs it
+# is to carry on; it then works each under that run's own token.
+AGENT_SERVICE = frozenset({"claim_waiting_runs"})
 
 QUEUE_AGENT = frozenset(
     {

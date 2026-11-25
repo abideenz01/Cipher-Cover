@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, type Run, type TraceEvent } from "../api";
 import { time } from "../format";
+import { usePoll } from "../poll";
 
 const KIND_LABELS: Record<TraceEvent["kind"], string> = {
   tool_call: "Calls",
@@ -49,25 +50,19 @@ export function Trace({ runId }: Readonly<{ runId: string }>) {
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const live = run === null || run.status === "running";
 
-  useEffect(() => {
-    if (!live) return;
-    let active = true;
-    async function load() {
+  usePoll(
+    async () => {
       const [nextRun, nextEvents] = await Promise.all([
         api.getRun(runId),
         api.listRunEvents(runId),
       ]);
-      if (!active) return;
       setRun(nextRun);
       setEvents(nextEvents);
-    }
-    void load();
-    const timer = setInterval(() => void load(), 1000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [runId, live]);
+    },
+    1000,
+    live,
+    runId,
+  );
 
   return (
     <>

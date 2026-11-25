@@ -73,17 +73,36 @@ Run on 2026-11-03 with instructions fingerprint `1c8b2cef2c28`, set version 2026
 | even_harder | 25/25 | 17/25 | 5/25 | 16/25 | 0/2 | 9/9 |
 | security | 3/3 | 1/3 | 1/3 | 1/3 | 0/0 | 1/1 |
 
-## Baseline: the real model
+## Baseline: the real model (G1)
 
-Not run yet, because it costs money. These are the runs to make before any change to the agent's instructions or tools, and before choosing how the instructions treat a withheld medical document:
+Run on 2026-11-11, before any change to the agent's tools or instructions, on the queue set (v2026.11, 35 claims) with `deepseek/deepseek-v4.1-flash`, instructions fingerprint `1c8b2cef2c28`. The two runs together cost $0.30 of OpenRouter credit. The labels are synthetic and from one handler each, so these are rates on 35 claims, not significance tests; slices under 30 are flagged in the reports.
+
+| Run | Medical documents | Decision correct | Payout exact | Decision and payout | Cites every expected section | Refer recall | Over limit waits | Median tokens a claim |
+|---|---|---|---|---|---|---|---|---|
+| `812783e22e15` | off (production) | 30/35 (85.7%, 95% CI 70.6 to 93.7) | 28/35 (80.0%) | 27/35 | 29/35 | 7/8 | 8/8 | 53,155 |
+| `6158f1b36985` | on | 31/35 (88.6%, 95% CI 74.0 to 95.5) | 30/35 (85.7%) | 30/35 | 32/35 | 6/8 | 6/6 | |
+
+The six emergency medical claims: decision correct 3/6 with medical documents off and 5/6 with them on. With n=6 this is a hint, not a finding. It is consistent with the risk in `docs/PLAN_PRODUCTION.md` section E that the medical gate costs accuracy on these claims; the instruction wording for a withheld medical document is still to be decided on that evidence.
+
+After D2 (2026-11-11, `022d27c3cfa4`, medical off, fingerprint `9d599a9f5eb1`, $0.20): the payout rules moved into `calculate_payout`. Decisions 30/35 and payouts 28/35, the same as G1; decision and payout 28/35 (G1 27/35); refer recall 8/8 (G1 7/8). Three runs failed on the 120-second time limit (CLM-1003, CLM-1403, CLM-1404, all with medical documents), against none in G1. `evals.compare` finds no difference outside the intervals. The scripted figures above did not move, because the scripted model's lines meet the same limits as before.
+
+After D5 (2026-11-11, fingerprint `062035d1c348`), the final measurement of `docs/PLAN_DURABLE.md`: the claim agent is a LangGraph graph that pays after an accepted approval, and `pay_claim` is no longer its tool. A claim that waits for sign-off counts as a run that succeeded.
+
+| Run | Medical documents | Decision correct | Payout exact | Decision and payout | Cites every expected section | Refer recall | Over limit waits | Median tokens a claim |
+|---|---|---|---|---|---|---|---|---|
+| `589fcf322cf2` | off (production) | 29/35 (82.9%, 95% CI 67.3 to 91.9) | 29/35 (82.9%) | 28/35 | 30/35 | 6/8 | 8/8 | 38,861 |
+| `8102ded19bee` | on | 30/35 (85.7%, 95% CI 70.6 to 93.7) | 29/35 (82.9%) | 27/35 | 29/35 | 4/8 | 6/6 | 40,504 |
+
+`evals.compare` of the medical-off run against G1 (`812783e22e15`) finds no difference outside the intervals. The median tokens a claim fell from 53,155 in G1 to 38,861. One run in each failed on the 120-second time limit (CLM-1025). Emergency medical claims: 6/6 with medical documents on. To watch: refer recall with medical documents on fell from 6/8 to 4/8 (n=8, a hint only).
+
+UnderCover's claim time limit was raised from 120 to 240 seconds on 2026-11-11, after the measurements above, because of the latency to the database. Later runs give claims more time, so a drop in time-limit failures against these runs is expected and is not an agent change.
+
+Every later measurement in `docs/PLAN_DURABLE.md` is compared with these two runs:
 
 ```bash
-uv run -m evals.run --set queue --model real                  # medical off, as in production
-uv run -m evals.run --set queue --model real --medical on
-uv run -m evals.compare OFF_ID ON_ID
+uv run --env-file .env -m evals.run --set queue --model real --medical off
+uv run -m evals.compare 812783e22e15 AFTER_ID
 ```
-
-Look at the `medical_documents: yes` slice (6 claims in the queue). With n=6, only a large difference means anything, so read the six claims' results in `eval_results` one by one, as well as the rates.
 
 ## Using it for a change
 

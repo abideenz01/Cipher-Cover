@@ -1,16 +1,17 @@
 """Agent runs on claims and their trace."""
 
 import json
-import sqlite3
 import threading
 import uuid
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from agent import main
-from backend import auth, clock, db, runner, store
+from backend import auth, clock, db, decisions, runner, store, trace
+from backend.trace import tenant_of
 
 router = APIRouter(prefix="/api")
 
@@ -20,9 +21,7 @@ def spawn(work: Callable[[], None]) -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
-def lease(
-    conn: sqlite3.Connection, claim_id: str, queue_run_id: str, tenant_id: str
-) -> str:
+def lease(conn: db.Connection, claim_id: str, queue_run_id: str, tenant_id: str) -> str:
     """Move a waiting claim to in progress under a new claim run, or raise 409.
 
     The claim is taken in one conditional update, so two callers can never both
@@ -42,8 +41,9 @@ def lease(
     run_id = uuid.uuid4().hex
     conn.execute(
         "INSERT INTO runs (run_id, claim_id, status, error, started_at, ended_at,"
-        " queue_run_id, attempt, failure, tokens, model_calls, model, tenant_id)"
-        " VALUES (?, ?, 'running', '', ?, '', ?, ?, '', 0, 0, '', ?)",
+        " queue_run_id, attempt, failure, tokens, model_calls, model, tenant_id, seq)"
+        " VALUES (?, ?, 'running', '', ?, '', ?, ?, '', 0, 0, '', ?,"
+        " (SELECT COALESCE(MAX(seq), 0) + 1 FROM runs))",
         (run_id, claim_id, clock.stamp(), queue_run_id, attempt + 1, tenant_id),
     )
     return run_id
@@ -55,7 +55,7 @@ def begin(claim_id: str, tenant_id: str) -> str:
         return lease(conn, claim_id, "", tenant_id)
 
 
-def claim_token(conn: sqlite3.Connection, run_id: str) -> str:
+def claim_token(conn: db.Connection, run_id: str) -> str:
     """Issue the token a claim agent works its run with, bound to its claim."""
     run = conn.execute(
         "SELECT claim_id, tenant_id FROM runs WHERE run_id = ?", (run_id,)
@@ -72,53 +72,80 @@ def claim_token(conn: sqlite3.Connection, run_id: str) -> str:
     )
 
 
-def tenant_of(conn: sqlite3.Connection, run_id: str) -> str:
-    """Return the tenant of a claim run or a queue run."""
-    row = conn.execute(
-        "SELECT tenant_id FROM runs WHERE run_id = ?"
-        " UNION ALL SELECT tenant_id FROM queue_runs WHERE run_id = ?",
-        (run_id, run_id),
-    ).fetchone()
-    return row["tenant_id"] if row else ""
-
-
 def record(run_id: str, step: dict[str, Any]) -> None:
-    """Store one step of a trace, or add a model call's usage to its run.
+    """Queue one step of a trace, or a model call's usage, to be saved.
 
     The run is a claim run or a queue run; both keep their steps in run_events.
+    Steps are saved in the background (backend/trace.py), so the agent doesn't
+    wait on the database; finish() saves them all before it ends a run.
     """
-    with db.connect() as conn:
-        if step["kind"] == "usage":
-            for table in ("runs", "queue_runs"):
-                conn.execute(
-                    f"UPDATE {table} SET tokens = tokens + ?,"  # noqa: S608 - fixed names
-                    " model_calls = model_calls + 1 WHERE run_id = ?",
-                    (step["detail"]["tokens"], run_id),
-                )
-            conn.execute(
-                "UPDATE runs SET model = ? WHERE run_id = ?", (step["name"], run_id)
-            )
-            return
-        conn.execute(
-            "INSERT INTO run_events (run_id, kind, name, detail, created_at,"
-            " tenant_id) VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                run_id,
-                step["kind"],
-                step["name"],
-                json.dumps(step["detail"]),
-                clock.stamp(),
-                tenant_of(conn, run_id),
-            ),
-        )
+    trace.WRITER.put(run_id, step)
+
+
+class Step(BaseModel):
+    """One step of a claim run's trace, sent by the agent's service."""
+
+    kind: str
+    name: str
+    detail: dict[str, Any]
+
+
+class RunEnd(BaseModel):
+    """How a claim run that the agent's service carried on ended."""
+
+    error: str
+    failure: str
+
+
+def signed_off(conn: db.Connection, claim: db.Row) -> Any:  # noqa: ANN401 - a row or None
+    """Return the sign-off of a claim that is signed off and not yet paid, or None."""
+    latest = store.latest_decision(conn, claim["claim_id"])
+    if claim["state"] != "in_progress" or latest is None:
+        return None
+    if store.paid_cents(conn, claim["claim_id"]):
+        return None
+    return decisions.signed_off(conn, claim["claim_id"], latest)
+
+
+def unpaid(conn: db.Connection, run_id: str, claim: db.Row) -> bool:
+    """Say whether this run approved the claim, needs no sign-off, and has not paid."""
+    latest = store.latest_decision(conn, claim["claim_id"])
+    return (
+        claim["state"] == "decided"
+        and latest is not None
+        and latest["run_id"] == run_id
+        and latest["decision"] == "approve"
+        and latest["payout_cents"] > 0
+        and not store.paid_cents(conn, claim["claim_id"])
+    )
+
+
+def waiting(conn: db.Connection, run_id: str, claim: db.Row) -> bool:
+    """Say whether this run approved the claim and waits for its sign-off."""
+    if claim["state"] != "waiting_for_signoff":
+        return False
+    latest = store.latest_decision(conn, claim["claim_id"])
+    return latest is not None and latest["run_id"] == run_id
 
 
 def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> None:
-    """End a run. A run that left its claim undecided has failed."""
+    """End a run. A run that left its claim undecided has failed.
+
+    A run whose claim waits for a sign-off is paused: it carries on, on the same
+    thread, once a handler signs off.
+    """
+    trace.WRITER.flush()
     with db.connect() as conn:
         auth.revoke(conn, run_id)
         tenant_id = tenant_of(conn, run_id)
-        undecided = store.claim_row(conn, claim_id, tenant_id)["state"] == "in_progress"
+        claim = store.claim_row(conn, claim_id, tenant_id)
+        held = waiting(conn, run_id, claim) or signed_off(conn, claim) is not None
+        # An approval this run recorded but never paid is still due: it is
+        # carried on and paid, never left behind.
+        due = unpaid(conn, run_id, claim)
+        undecided = claim["state"] == "in_progress" and not held
+        status = "paused" if held else "interrupted" if due else "succeeded"
+        held = held or due
         if not error and undecided:
             error = "The agent finished without recording a decision."
         if undecided:
@@ -132,7 +159,7 @@ def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> No
             "UPDATE runs SET status = ?, error = ?, failure = ?, ended_at = ?"
             " WHERE run_id = ?",
             (
-                "failed" if error else "succeeded",
+                "failed" if error and not held else status,
                 error,
                 failure if error else "",
                 clock.stamp(),
@@ -141,16 +168,138 @@ def finish(run_id: str, claim_id: str, error: str, failure: str = "error") -> No
         )
 
 
-def work(run_id: str, claim_id: str) -> None:
-    """Run the agent and record how the run ended."""
+def attempt(run_id: str, claim_id: str, go: Callable[[str], None]) -> None:
+    """Work a run under a new token and record how it ended."""
     with db.connect() as conn:
         token = claim_token(conn, run_id)
     try:
-        runner.execute(claim_id, run_id, lambda step: record(run_id, step), token)
+        go(token)
     except Exception as error:  # noqa: BLE001 - a failed run must free its claim
         finish(run_id, claim_id, main.describe(error), main.failure(error))
         return
     finish(run_id, claim_id, "")
+
+
+def work(run_id: str, claim_id: str) -> None:
+    """Run the agent on a new run and record how the run ended."""
+
+    def go(token: str) -> None:
+        runner.execute(claim_id, run_id, lambda step: record(run_id, step), token)
+
+    attempt(run_id, claim_id, go)
+
+
+def reopen(run_id: str) -> str:
+    """Take a paused or interrupted run back to running and return its claim.
+
+    The run is taken in one conditional update, so it can't be resumed twice
+    at once. Returns '' when it is not paused or interrupted.
+    """
+    with db.connect() as conn:
+        taken = conn.execute(
+            "UPDATE runs SET status = 'running', ended_at = ''"
+            " WHERE run_id = ? AND status IN ('paused', 'interrupted')",
+            (run_id,),
+        ).rowcount
+        if not taken:
+            return ""
+        return conn.execute(
+            "SELECT claim_id FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()[0]
+
+
+def resume(run_id: str, signoff: dict[str, Any] | None) -> None:
+    """Carry a run on, on its own thread, with no new attempt.
+
+    With a sign-off it pays the claim it was waiting on; without, it goes on
+    from where it was stopped.
+    """
+    claim_id = reopen(run_id)
+    if not claim_id:
+        return
+
+    def go(token: str) -> None:
+        on_step = lambda step: record(run_id, step)  # noqa: E731 - one line
+        runner.resume(claim_id, run_id, signoff, on_step, token)
+
+    attempt(run_id, claim_id, go)
+
+
+def resumable(conn: db.Connection, tenant_id: str) -> list[tuple[str, Any]]:
+    """Return the runs to carry on, oldest first, each with its sign-off or None.
+
+    These are runs a restart stopped, and runs that waited for a sign-off that
+    has now been given. With tenant_id '' they are every tenant's.
+    """
+    rows = conn.execute(
+        "SELECT runs.run_id, runs.status, claims.* FROM runs"
+        " JOIN claims ON claims.claim_id = runs.claim_id"
+        " WHERE (runs.status = 'interrupted'"
+        " OR (runs.status = 'paused' AND claims.state = 'in_progress'))"
+        " AND (? = '' OR runs.tenant_id = ?) ORDER BY runs.seq",
+        (tenant_id, tenant_id),
+    ).fetchall()
+    found = []
+    for row in rows:
+        signoff = signed_off(conn, row) if row["status"] == "paused" else None
+        if row["status"] == "paused" and signoff is None:
+            continue
+        found.append((row["run_id"], signoff and dict(signoff)))
+    return found
+
+
+def carry_on(tenant_id: str) -> list[str]:
+    """Carry on, on this backend's threads, every run of a tenant that is due."""
+    with db.connect() as conn:
+        due = resumable(conn, tenant_id)
+    for run_id, signoff in due:
+        resume(run_id, signoff)
+    return [run_id for run_id, _ in due]
+
+
+def hand_over() -> list[dict[str, Any]]:
+    """Take every due run back to running, with a token, for the agent's service."""
+    with db.connect() as conn:
+        due = resumable(conn, "")
+    handed = []
+    for run_id, signoff in due:
+        claim_id = reopen(run_id)
+        if not claim_id:
+            continue
+        with db.connect() as conn:
+            tenant_id = tenant_of(conn, run_id)
+            company = db.reference(conn, "company", tenant_id)
+            handed.append(
+                {
+                    "run_id": run_id,
+                    "claim_id": claim_id,
+                    "token": claim_token(conn, run_id),
+                    "signoff": signoff,
+                    "seconds": company["agent_run_timeout_seconds"],
+                }
+            )
+    return handed
+
+
+@router.post("/agent/resumable", operation_id="claim_waiting_runs")
+def claim_waiting_runs(_who: auth.Who) -> list[dict[str, Any]]:
+    """Hand the agent's service every run to carry on, with its token."""
+    return hand_over()
+
+
+@router.post("/runs/{run_id}/steps", operation_id="record_run_step")
+def record_run_step(run_id: str, body: Step, _who: auth.Who) -> dict[str, str]:
+    """Add one step to a claim run's trace."""
+    record(run_id, body.model_dump())
+    return {"run_id": run_id}
+
+
+@router.post("/runs/{run_id}/end", operation_id="end_claim_run")
+def end_claim_run(run_id: str, body: RunEnd, who: auth.Who) -> dict[str, Any]:
+    """End a claim run that the agent's service carried on."""
+    finish(run_id, who.claim_id, body.error, body.failure or "error")
+    with db.connect() as conn:
+        return run_view(conn, run_id, who.tenant_id)
 
 
 def run_view(conn: Any, run_id: str, tenant_id: str) -> dict[str, Any]:

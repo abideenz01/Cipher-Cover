@@ -203,6 +203,100 @@ describe("the queue", () => {
   });
 });
 
+describe("the drawer after a decision", () => {
+  it("shows who signed off, while the agent pays and once it has", async () => {
+    const approved = {
+      decision: "approve" as const,
+      payout: 1500,
+      reason: "The bag was lost by the airline.",
+      section: "Section 5. Baggage",
+      sections: [{ id: "wording-5", title: "Section 5. Baggage" }],
+      run_id: "r1",
+      steps: [],
+      model: "stub",
+      wording_version: "2026.1",
+      created_at: "2026-10-30T07:00:00+00:00",
+    };
+    const signoff = {
+      amount: 1500,
+      signed_off_by: "Dana Whitfield",
+      signed_off_at: "2026-10-30T08:00:00+00:00",
+    };
+    const paying = claim({
+      state: "in_progress",
+      decisions: [approved],
+      signoffs: [signoff],
+    });
+    stubApi({
+      "GET /api/claims": [paying],
+      "GET /api/claims/CLM-1002": paying,
+      "GET /api/policies/POL-2002": POLICY,
+    });
+    const view = render(<App me={ME} onSignOut={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /CLM-1002/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Decision" }));
+    expect(
+      screen.getByText(
+        /Signed off by Dana Whitfield at \d\d:\d\d\. The agent is paying it\./,
+      ),
+    ).toBeDefined();
+    view.unmount();
+
+    const paid = claim({
+      state: "decided",
+      paid: 1500,
+      decisions: [approved],
+      signoffs: [signoff],
+      payments: [
+        {
+          amount: 1500,
+          paid_at: "2026-10-30T08:00:04+00:00",
+          signed_off_by: "HND-01",
+          signed_off_at: signoff.signed_off_at,
+        },
+      ],
+    });
+    stubApi({
+      "GET /api/claims": [paid],
+      "GET /api/claims/CLM-1002": paid,
+      "GET /api/policies/POL-2002": POLICY,
+    });
+    render(<App me={ME} onSignOut={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /CLM-1002/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Decision" }));
+    expect(
+      screen.getByText(
+        /at \d\d:\d\d, signed off by Dana Whitfield at \d\d:\d\d\./,
+      ),
+    ).toBeDefined();
+  });
+
+  it("says when an attempt waits for sign-off or carries on next run", async () => {
+    const held = claim({
+      runs: [
+        run({ run_id: "r1", status: "interrupted" }),
+        run({ run_id: "r2", attempt: 2, status: "paused" }),
+      ],
+    });
+    stubApi({
+      "GET /api/claims": [held],
+      "GET /api/claims/CLM-1002": held,
+      "GET /api/policies/POL-2002": POLICY,
+      "GET /api/runs/r1": run({ status: "interrupted" }),
+      "GET /api/runs/r1/events": [],
+      "GET /api/runs/r2": run({ run_id: "r2", status: "paused" }),
+      "GET /api/runs/r2/events": [],
+    });
+    render(<App me={ME} onSignOut={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /CLM-1002/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Trace" }));
+    expect(
+      screen.getByText("Attempt 1 · stopped; carries on next run"),
+    ).toBeDefined();
+    expect(screen.getByText("Attempt 2 · waiting for sign-off")).toBeDefined();
+  });
+});
+
 describe("the drawer", () => {
   it("opens a claim and closes on Escape", async () => {
     stubApi({

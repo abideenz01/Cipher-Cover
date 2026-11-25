@@ -14,6 +14,7 @@ import { MetricStrip } from "./components/MetricStrip";
 import { Rail, type View } from "./components/Rail";
 import { RunPanel } from "./components/RunPanel";
 import { isLive, matches } from "./format";
+import { usePoll } from "./poll";
 import { Admin } from "./views/Admin";
 import { Instructions } from "./views/Instructions";
 import { SignOff, type Highlight } from "./views/SignOff";
@@ -91,8 +92,8 @@ export function App({
   const speaking = me.handler_id ? provider : null;
   const voice = useVoice({ provider: speaking, onAction });
 
-  const refresh = useCallback(() => {
-    Promise.all([api.listClaims(), api.listQueueRuns()]).then(
+  const load = useCallback(() => {
+    return Promise.all([api.listClaims(), api.listQueueRuns()]).then(
       ([next, nextRuns]) => {
         setClaims(next);
         setQueueRuns(nextRuns);
@@ -109,13 +110,11 @@ export function App({
     setError(e instanceof Error ? e.message : "The run did not start.");
   }
 
-  useEffect(() => {
-    refresh();
-    const timer = setInterval(refresh, 2000);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [refresh]);
+  const refresh = useCallback(() => {
+    void load();
+  }, [load]);
+
+  usePoll(load, 2000);
 
   useEffect(() => {
     function onHash() {

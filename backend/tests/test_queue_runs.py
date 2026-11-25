@@ -280,7 +280,7 @@ def test_a_queue_run_records_what_it_was_allowed(monkeypatch):
     assert run["cap"] == 5
     assert run["limits"] == {
         "claim_step_limit": 30,
-        "claim_seconds": 120,
+        "claim_seconds": 240,
         "token_limit": 1_000_000,
         "provider_failures_to_pause": 3,
     }

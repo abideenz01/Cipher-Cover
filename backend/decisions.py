@@ -1,7 +1,6 @@
 """Working out payouts, recording decisions and paying claims."""
 
 import json
-import sqlite3
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -38,15 +37,13 @@ class Payment(BaseModel):
     amount: float
 
 
-def limit_cents(conn: sqlite3.Connection, tenant_id: str) -> int:
+def limit_cents(conn: db.Connection, tenant_id: str) -> int:
     """Return the tenant's payout approval limit in cents."""
     company = db.reference(conn, "company", tenant_id)
     return db.cents(company["payout_approval_limit"])
 
 
-def holds(
-    conn: sqlite3.Connection, who: auth.Principal, run_id: str, claim_id: str
-) -> None:
+def holds(conn: db.Connection, who: auth.Principal, run_id: str, claim_id: str) -> None:
     """Refuse unless the run is a live claim run on this claim, under this token."""
     store.claim_row(conn, claim_id, who.tenant_id)
     if store.live_run(conn, run_id, who.tenant_id)["claim_id"] != claim_id:
@@ -55,7 +52,7 @@ def holds(
         raise HTTPException(403, f"This token is not for run {run_id}.")
 
 
-def cited(conn: sqlite3.Connection, run_id: str, ids: list[str]) -> str:
+def cited(conn: db.Connection, run_id: str, ids: list[str]) -> str:
     """Return the cited sections as text, or refuse what the run never read."""
     if not ids:
         raise HTTPException(409, "Cite at least one section you relied on.")
@@ -70,14 +67,50 @@ def cited(conn: sqlite3.Connection, run_id: str, ids: list[str]) -> str:
     return "; ".join(sections.title(s) for s in ids)
 
 
-def pay(
-    conn: sqlite3.Connection, tenant_id: str, claim_id: str, amount_cents: int
+def repeated(conn: db.Connection, claim_id: str, body: Decision) -> bool:
+    """Say whether this run already recorded this decision and payout.
+
+    A claim agent that carries on after a restart may record its decision again;
+    that counts as done. A different decision is still refused.
+    """
+    latest = store.latest_decision(conn, claim_id)
+    return (
+        latest is not None
+        and latest["run_id"] == body.run_id
+        and latest["decision"] == body.decision
+        and latest["payout_cents"] == db.cents(body.payout)
+    )
+
+
+def signed_off(conn: db.Connection, claim_id: str, decision: db.Row) -> Any:  # noqa: ANN401 - a row or None
+    """Return the handler's sign-off of this decision's payout, or None."""
+    return conn.execute(
+        "SELECT handler_id, created_at FROM signoffs WHERE claim_id = ?"
+        " AND amount_cents = ? AND created_at >= ? ORDER BY id DESC",
+        (claim_id, decision["payout_cents"], decision["created_at"]),
+    ).fetchone()
+
+
+def pay(  # noqa: PLR0913, PLR0917 - one argument per column
+    conn: db.Connection,
+    tenant_id: str,
+    claim_id: str,
+    amount_cents: int,
+    signed_off_by: str = "",
+    signed_off_at: str = "",
 ) -> None:
-    """Record a payment. No money leaves the system."""
+    """Record a payment, with the sign-off it rests on. No money leaves the system."""
     conn.execute(
-        "INSERT INTO payments (claim_id, amount_cents, created_at, tenant_id)"
-        " VALUES (?, ?, ?, ?)",
-        (claim_id, amount_cents, clock.stamp(), tenant_id),
+        "INSERT INTO payments (claim_id, amount_cents, created_at, tenant_id,"
+        " signed_off_by, signed_off_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            claim_id,
+            amount_cents,
+            clock.stamp(),
+            tenant_id,
+            signed_off_by,
+            signed_off_at,
+        ),
     )
 
 
@@ -89,15 +122,17 @@ def calculate_payout(claim_id: str, body: Calculation, who: auth.Who) -> dict[st
         claim = store.claim_row(conn, claim_id, who.tenant_id)
         policy = store.policy_view(conn, claim["policy_id"], who.tenant_id)
         benefit = json.loads(claim["data"])["claim_type"]
+        company = db.reference(conn, "company", who.tenant_id)
         total, steps = payout.calculate(
-            policy, benefit, body.lines, body.paid_by_others
+            policy, company, benefit, body.lines, body.paid_by_others
         )
+        over = total > limit_cents(conn, who.tenant_id)
         conn.execute(
             "INSERT INTO calculations (claim_id, payout_cents, steps, created_at,"
             " tenant_id) VALUES (?, ?, ?, ?, ?)",
             (claim_id, total, json.dumps(steps), clock.stamp(), who.tenant_id),
         )
-    return {"payout": db.dollars(total), "steps": steps}
+    return {"payout": db.dollars(total), "steps": steps, "needs_sign_off": over}
 
 
 @router.post("/claims/{claim_id}/decision", operation_id="record_decision")
@@ -105,7 +140,10 @@ def record_decision(claim_id: str, body: Decision, who: auth.Who) -> dict[str, A
     """Store the agent's decision on a claim."""
     with db.connect() as conn:
         holds(conn, who, body.run_id, claim_id)
-        if store.claim_row(conn, claim_id, who.tenant_id)["state"] != "in_progress":
+        state = store.claim_row(conn, claim_id, who.tenant_id)["state"]
+        if state != "in_progress":
+            if repeated(conn, claim_id, body):
+                return {"claim_id": claim_id, "state": state, "decision": body.decision}
             raise HTTPException(409, f"Claim {claim_id} is already decided.")
         if not body.reason.strip():
             raise HTTPException(409, "The reason is missing.")
@@ -153,7 +191,7 @@ def record_decision(claim_id: str, body: Decision, who: auth.Who) -> dict[str, A
 
 @router.post("/claims/{claim_id}/pay", operation_id="pay_claim")
 def pay_claim(claim_id: str, body: Payment, who: auth.Who) -> dict[str, Any]:
-    """Pay an amount, blocked until a handler signs off when over the limit."""
+    """Pay the approved amount; over the limit, only after a handler's sign-off."""
     with db.connect() as conn:
         holds(conn, who, body.run_id, claim_id)
         latest = store.latest_decision(conn, claim_id)
@@ -162,9 +200,16 @@ def pay_claim(claim_id: str, body: Payment, who: auth.Who) -> dict[str, Any]:
             raise HTTPException(409, "Only an approved claim can be paid.")
         if latest["payout_cents"] != amount:
             raise HTTPException(409, "The amount must match the approved payout.")
-        if store.paid_cents(conn, claim_id):
+        if paid := store.paid_cents(conn, claim_id):
+            if paid == amount:
+                return {"claim_id": claim_id, "paid": db.dollars(amount)}
             raise HTTPException(409, "This claim is already paid.")
+        signoff = None
         if amount > limit_cents(conn, who.tenant_id):
-            raise HTTPException(409, "Waiting for a handler's sign-off.")
-        pay(conn, who.tenant_id, claim_id, amount)
+            signoff = signed_off(conn, claim_id, latest)
+            if signoff is None:
+                raise HTTPException(409, "Waiting for a handler's sign-off.")
+        by, at = (signoff["handler_id"], signoff["created_at"]) if signoff else ("", "")
+        pay(conn, who.tenant_id, claim_id, amount, by, at)
+        store.set_state(conn, claim_id, "decided")
     return {"claim_id": claim_id, "paid": db.dollars(amount)}

@@ -7,7 +7,7 @@ import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 
-from agent import main
+from agent import checkpoints, main
 from agent.stub import FaultyModel, ScriptedModel
 from backend import db, runner, runs
 from backend.tests import sessions
@@ -72,7 +72,7 @@ def run_with(monkeypatch, claim_id, llm, seconds=120):
 def test_run_approves_and_pays():
     steps = []
     reply = run_claim("CLM-1001", ScriptedModel(), steps.append)
-    assert reply == "Approved CLM-1001."
+    assert reply == "CLM-1001: approve, $420.00, paid."
     calls = [s["name"] for s in steps if s["kind"] == "tool_call"]
     assert calls == [
         "get_claim",
@@ -81,8 +81,9 @@ def test_run_approves_and_pays():
         "read_section",
         "calculate_payout",
         "record_decision",
-        "pay_claim",
     ]
+    assert steps[-1]["kind"] == "tool_result"
+    assert steps[-1]["name"] == "pay_claim"
     claim = client.get("/api/claims/CLM-1001").json()
     assert claim["state"] == "decided"
     assert claim["decisions"][-1]["decision"] == "approve"
@@ -97,8 +98,8 @@ def test_a_run_records_what_it_read_and_used(monkeypatch):
     assert run["sections_read"] == [
         {"id": "wording-10", "title": "Section 10. How we work out your payment"}
     ]
-    assert run["model_calls"] == 8
-    assert run["tokens"] == 800
+    assert run["model_calls"] == 6
+    assert run["tokens"] == 600
     assert run["model"] == "scripted"
     decision = client.get("/api/claims/CLM-1001").json()["decisions"][-1]
     assert [s["id"] for s in decision["sections"]] == ["wording-10"]
@@ -107,14 +108,18 @@ def test_a_run_records_what_it_read_and_used(monkeypatch):
     assert "usage" not in {e["kind"] for e in events}
 
 
-def test_agent_cannot_pay_over_the_limit():
-    steps = []
-    run_claim("CLM-1011", ScriptedModel(), steps.append)
-    paid = [s for s in steps if s["kind"] == "tool_result" and s["name"] == "pay_claim"]
-    assert "Waiting for a handler's sign-off." in paid[0]["detail"]["result"]
+def test_a_payout_over_the_limit_stops_at_the_interrupt(monkeypatch):
+    run = run_with(monkeypatch, "CLM-1011", ScriptedModel())
+    assert run["status"] == "paused"
     claim = client.get("/api/claims/CLM-1011").json()
     assert claim["state"] == "waiting_for_signoff"
     assert claim["paid"] == 0
+    saved = checkpoints.MEMORY.get_tuple({"configurable": {"thread_id": run["run_id"]}})
+    assert saved is not None
+    assert saved.checkpoint["channel_values"]["decision"]["state"] == (
+        "waiting_for_signoff"
+    )
+    assert [w[1] for w in saved.pending_writes or []].count("__interrupt__") == 1
 
 
 def test_tools():
@@ -126,11 +131,8 @@ def test_tools():
         "read_section",
         "calculate_payout",
         "record_decision",
-        "pay_claim",
     ]
-    schema = main.record_decision.args
-    assert "run_id" not in schema
-    assert "run_id" not in main.pay_claim.args
+    assert "run_id" not in main.record_decision.args
 
 
 def test_system_prompt_is_the_claim_instructions_only():
@@ -166,7 +168,7 @@ def test_provider_errors_are_retried(monkeypatch):
     model = FaultyModel(errors=[rate_limited(), rate_limited()])
     run = run_with(monkeypatch, "CLM-1001", model)
     assert run["status"] == "succeeded"
-    assert len(model.prompts) == 8
+    assert len(model.prompts) == 6
     assert client.get("/api/claims/CLM-1001").json()["failed_attempts"] == 0
 
 

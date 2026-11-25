@@ -176,6 +176,8 @@ docs/HARNESS.md
 
 docs/STATUS.md
 
+docs/DURABLE.md
+
 backend/
 
 agent/

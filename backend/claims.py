@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -25,13 +24,11 @@ def withheld(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def summary(
-    conn: sqlite3.Connection, row: sqlite3.Row, who: auth.Principal
+def view(
+    row: db.Row, who: auth.Principal, name: str, latest: db.Row | None, paid: int
 ) -> dict[str, Any]:
-    """Return one claim as it appears in the queue. Agents see a short name only."""
+    """Shape a claim for the queue from its row and what was looked up for it."""
     data = json.loads(row["data"])
-    name = store.customer_name(conn, row["customer_id"], row["tenant_id"])
-    latest = store.latest_decision(conn, row["claim_id"])
     return {
         "claim_id": row["claim_id"],
         "policy_id": row["policy_id"],
@@ -47,7 +44,7 @@ def summary(
         "left_for_handler": row["failed_attempts"] >= store.FAILURES_FOR_HANDLER,
         "decision": latest["decision"] if latest else "",
         "payout": db.dollars(latest["payout_cents"]) if latest else 0.0,
-        "paid": db.dollars(store.paid_cents(conn, row["claim_id"])),
+        "paid": db.dollars(paid),
     }
 
 
@@ -55,19 +52,65 @@ def summary(
 def list_claims(who: auth.Who) -> list[dict[str, Any]]:
     """List the queue with each claim's state and latest decision."""
     with db.connect() as conn:
+        # Four queries for the whole queue, not three for each claim: against a
+        # remote database every round trip counts.
+        tenant = (who.tenant_id,)
         rows = conn.execute(
-            "SELECT * FROM claims WHERE tenant_id = ? ORDER BY claim_id",
-            (who.tenant_id,),
+            "SELECT * FROM claims WHERE tenant_id = ? ORDER BY claim_id", tenant
         ).fetchall()
-        return [summary(conn, row, who) for row in rows]
+        names = {
+            c["customer_id"]: c["name"]
+            for c in conn.execute(
+                "SELECT customer_id, name FROM customers WHERE tenant_id = ?", tenant
+            ).fetchall()
+        }
+        latest = {
+            d["claim_id"]: d
+            for d in conn.execute(
+                "SELECT * FROM decisions WHERE id IN (SELECT MAX(id)"
+                " FROM decisions WHERE tenant_id = ? GROUP BY claim_id)",
+                tenant,
+            ).fetchall()
+        }
+        paid = {
+            p["claim_id"]: p["cents"]
+            for p in conn.execute(
+                "SELECT claim_id, SUM(amount_cents) AS cents FROM payments"
+                " WHERE tenant_id = ? GROUP BY claim_id",
+                tenant,
+            ).fetchall()
+        }
+        return [
+            view(
+                row,
+                who,
+                names[row["customer_id"]],
+                latest.get(row["claim_id"]),
+                paid.get(row["claim_id"], 0),
+            )
+            for row in rows
+        ]
 
 
 @router.get("/claims/{claim_id}", operation_id="get_claim")
 def get_claim(claim_id: str, who: auth.Who) -> dict[str, Any]:
     """Return one claim in full, with its decisions and runs."""
     with db.connect() as conn:
-        row = store.claim_row(conn, claim_id, who.tenant_id)
-        medical = auth.tenant_config(conn, who.tenant_id).get("external_model_medical")
+        # The claim, its customer's name and the tenant's settings in one query,
+        # and the latest decision and payments from the lists below: against a
+        # remote database every round trip counts.
+        row = conn.execute(
+            "SELECT c.*, cu.name AS customer_full_name, t.config AS tenant_config"
+            " FROM claims c JOIN customers cu ON cu.customer_id = c.customer_id"
+            " AND cu.tenant_id = c.tenant_id"
+            " LEFT JOIN tenants t ON t.tenant_id = c.tenant_id"
+            " WHERE c.claim_id = ? AND c.tenant_id = ?",
+            (claim_id, who.tenant_id),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, f"There is no claim {claim_id}.")
+        config = json.loads(row["tenant_config"] or "{}")
+        medical = config.get("external_model_medical")
         data = json.loads(row["data"])
         decisions = conn.execute(
             "SELECT * FROM decisions WHERE claim_id = ? ORDER BY id", (claim_id,)
@@ -79,10 +122,24 @@ def get_claim(claim_id: str, who: auth.Who) -> dict[str, Any]:
             "SELECT handler_id, reason, created_at FROM sendbacks WHERE claim_id = ?",
             (claim_id,),
         ).fetchall()
+        signoffs = conn.execute(
+            "SELECT s.amount_cents, s.created_at, h.name FROM signoffs s"
+            " JOIN handlers h ON h.handler_id = s.handler_id"
+            " AND h.tenant_id = s.tenant_id WHERE s.claim_id = ? ORDER BY s.id",
+            (claim_id,),
+        ).fetchall()
+        payments = conn.execute(
+            "SELECT amount_cents, created_at, signed_off_by, signed_off_at"
+            " FROM payments WHERE claim_id = ? ORDER BY id",
+            (claim_id,),
+        ).fetchall()
+        read = store.sections_by_run(conn, claim_id)
         documents = data["documents"]
         if who.agent and not medical:
             documents = withheld(documents)
-        return summary(conn, row, who) | {
+        latest = decisions[-1] if decisions else None
+        paid = sum(p["amount_cents"] for p in payments)
+        return view(row, who, row["customer_full_name"], latest, paid) | {
             "incident_date": data["incident_date"],
             "incident_location": data["incident_location"],
             "submitted_on": data["submitted_on"],
@@ -90,8 +147,25 @@ def get_claim(claim_id: str, who: auth.Who) -> dict[str, Any]:
             "items": data["items"],
             "documents": documents,
             "decisions": [store.decision_view(d) for d in decisions],
-            "runs": [store.run_view(conn, r) for r in runs],
+            "runs": [store.run_view(conn, r, read.get(r["run_id"], [])) for r in runs],
             "sendbacks": [dict(s) for s in sendbacks],
+            "signoffs": [
+                {
+                    "amount": db.dollars(s["amount_cents"]),
+                    "signed_off_by": s["name"],
+                    "signed_off_at": s["created_at"],
+                }
+                for s in signoffs
+            ],
+            "payments": [
+                {
+                    "amount": db.dollars(p["amount_cents"]),
+                    "paid_at": p["created_at"],
+                    "signed_off_by": p["signed_off_by"],
+                    "signed_off_at": p["signed_off_at"],
+                }
+                for p in payments
+            ],
         }
 
 
